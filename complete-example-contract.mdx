@@ -1,0 +1,461 @@
+---
+title: "Complete Example Contract"
+description: "A production-ready Solidity contract combining every IFÁ Labs integration pattern — price reads, verification, batching, derived pairs, gas optimisation, and graceful degradation."
+---
+
+This page brings together every pattern covered in the EVM integration guides into a single, deployable contract. It is not a minimal example — it is a reference implementation you can use as a foundation for a real protocol.
+
+Read through it in full before adapting it. Every decision is intentional and annotated.
+
+---
+
+## What This Contract Demonstrates
+
+| Pattern | Where It Appears |
+| --- | --- |
+| Constants for oracle address and asset IDs | Contract-level declarations |
+| Single asset price read with full verification | `getVerifiedPrice` |
+| Batch price read for multiple assets | `getMultipleVerifiedPrices` |
+| Derived pair pricing | `getCrossAssetPrice` |
+| Staleness check with per-asset thresholds | `_isFresh` |
+| Peg deviation circuit breaker | `_isReasonable` |
+| Protocol pause on oracle failure | `whenOracleHealthy` modifier |
+| Cross-transaction price cache | `_getCachedPrice` |
+| Graceful fallback on stale data | `getVerifiedPriceWithFallback` |
+| Storage struct packing | `CachedPrice` struct |
+
+---
+
+## The Contract
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.29;
+
+import "ifapricefeed-interface/IIfaPriceFeed.sol";
+
+/// @title  IfaIntegrationReference
+/// @notice Production-ready reference contract for IFÁ Labs oracle integration.
+///         Demonstrates all recommended patterns for consuming stablecoin price feeds.
+/// @dev    Adapt this contract to your protocol's needs. Do not deploy as-is
+///         without reviewing all configuration constants for your specific use case.
+contract IfaIntegrationReference {
+
+    // -------------------------------------------------------------------------
+    // Oracle Configuration
+    // -------------------------------------------------------------------------
+
+    /// @dev Oracle contract — Base Mainnet
+    IIfaPriceFeed public constant ORACLE =
+        IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC);
+
+    // Asset IDs — keccak256(abi.encodePacked("SYMBOL/USD"))
+    bytes32 public constant USDT_ASSET_ID =
+        0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d;
+
+    bytes32 public constant USDC_ASSET_ID =
+        0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d;
+
+    bytes32 public constant CNGN_ASSET_ID =
+        0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a;
+
+    bytes32 public constant ZARP_ASSET_ID =
+        0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8;
+
+    bytes32 public constant BRZ_ASSET_ID =
+        0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5;
+
+    bytes32 public constant ETH_ASSET_ID =
+        0x8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0;
+
+    // -------------------------------------------------------------------------
+    // Risk Parameters
+    // -------------------------------------------------------------------------
+
+    /// @dev Default staleness threshold — 1 hour
+    uint256 public constant DEFAULT_MAX_AGE = 3600;
+
+    /// @dev Extended threshold for emerging market stablecoins — 2 hours
+    uint256 public constant EMERGING_MAX_AGE = 7200;
+
+    /// @dev Maximum acceptable peg deviation — 5% expressed in basis points
+    uint256 public constant MAX_DEVIATION_BPS = 500;
+
+    /// @dev Expected peg value for USD stablecoins scaled to 18 decimals
+    int256  public constant EXPECTED_PEG = 1e18;
+
+    // -------------------------------------------------------------------------
+    // Protocol State
+    // -------------------------------------------------------------------------
+
+    /// @dev Emergency pause — set automatically if oracle health check fails
+    bool public paused;
+
+    /// @dev Address authorised to unpause the protocol
+    address public guardian;
+
+    // -------------------------------------------------------------------------
+    // Price Cache
+    // -------------------------------------------------------------------------
+
+    /// @dev Packed struct — price in slot 0, timestamp + decimal share slot 1
+    struct CachedPrice {
+        int256  price;      // 32 bytes — slot 0
+        uint64  cachedAt;   // 8 bytes  ─┐
+        int8    decimal;    // 1 byte    ─┘ slot 1 (packed)
+    }
+
+    mapping(bytes32 => CachedPrice) private _priceCache;
+
+    /// @dev Cache TTL for non-critical reads — 5 minutes
+    uint256 public constant CACHE_TTL = 300;
+
+    // -------------------------------------------------------------------------
+    // Per-Asset Staleness Thresholds
+    // -------------------------------------------------------------------------
+
+    mapping(bytes32 => uint256) public maxPriceAge;
+
+    // -------------------------------------------------------------------------
+    // Events
+    // -------------------------------------------------------------------------
+
+    event PriceRead(bytes32 indexed assetId, int256 price, uint256 timestamp);
+    event ProtocolPaused(bytes32 indexed assetId, uint256 timestamp);
+    event ProtocolUnpaused(address indexed guardian, uint256 timestamp);
+    event CacheUpdated(bytes32 indexed assetId, int256 price, uint256 cachedAt);
+
+    // -------------------------------------------------------------------------
+    // Errors
+    // -------------------------------------------------------------------------
+
+    error AssetNotSupported(bytes32 assetId);
+    error PriceFeedStale(bytes32 assetId, uint256 age, uint256 maxAge);
+    error PriceDeviationExceeded(bytes32 assetId, int256 price);
+    error ProtocolIsPaused();
+    error NotGuardian();
+
+    // -------------------------------------------------------------------------
+    // Constructor
+    // -------------------------------------------------------------------------
+
+    constructor(address _guardian) {
+        guardian = _guardian;
+
+        // Configure per-asset staleness thresholds
+        maxPriceAge[USDT_ASSET_ID] = DEFAULT_MAX_AGE;
+        maxPriceAge[USDC_ASSET_ID] = DEFAULT_MAX_AGE;
+        maxPriceAge[CNGN_ASSET_ID] = EMERGING_MAX_AGE;
+        maxPriceAge[ZARP_ASSET_ID] = EMERGING_MAX_AGE;
+        maxPriceAge[BRZ_ASSET_ID]  = EMERGING_MAX_AGE;
+        maxPriceAge[ETH_ASSET_ID]  = DEFAULT_MAX_AGE;
+    }
+
+    // -------------------------------------------------------------------------
+    // Modifiers
+    // -------------------------------------------------------------------------
+
+    /// @dev Reverts if the protocol has been paused due to an oracle failure
+    modifier whenNotPaused() {
+        if (paused) revert ProtocolIsPaused();
+        _;
+    }
+
+    /// @dev Pauses the protocol if the given asset's price feed is unhealthy
+    modifier whenOracleHealthy(bytes32 assetId) {
+        (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+            ORACLE.getAssetInfo(assetId);
+
+        if (!exists || !_isFresh(info.lastUpdateTime, maxPriceAge[assetId])) {
+            paused = true;
+            emit ProtocolPaused(assetId, block.timestamp);
+            revert ProtocolIsPaused();
+        }
+        _;
+    }
+
+    // -------------------------------------------------------------------------
+    // Core Price Functions
+    // -------------------------------------------------------------------------
+
+    /// @notice Fetch and fully verify a single stablecoin price feed.
+    ///         Performs existence, staleness, and peg deviation checks.
+    /// @param  assetId  The IFÁ Labs bytes32 asset identifier
+    /// @return price    Verified scaled price value
+    /// @return decimal  Negative scaling exponent (typically -18)
+    function getVerifiedPrice(bytes32 assetId)
+        public
+        view
+        returns (int256 price, int8 decimal)
+    {
+        (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+            ORACLE.getAssetInfo(assetId);
+
+        if (!exists)
+            revert AssetNotSupported(assetId);
+
+        uint256 age = block.timestamp - info.lastUpdateTime;
+        uint256 maxAge = maxPriceAge[assetId] > 0
+            ? maxPriceAge[assetId]
+            : DEFAULT_MAX_AGE;
+
+        if (!_isFresh(info.lastUpdateTime, maxAge))
+            revert PriceFeedStale(assetId, age, maxAge);
+
+        if (!_isReasonable(info.price))
+            revert PriceDeviationExceeded(assetId, info.price);
+
+        return (info.price, info.decimal);
+    }
+
+    /// @notice Fetch verified prices for multiple assets in a single call.
+    ///         More gas-efficient than calling getVerifiedPrice N times.
+    /// @param  assetIds  Array of IFÁ Labs bytes32 asset identifiers
+    /// @return prices    Array of verified scaled price values
+    /// @return decimals  Array of negative scaling exponents
+    function getMultipleVerifiedPrices(bytes32[] calldata assetIds)
+        external
+        view
+        returns (int256[] memory prices, int8[] memory decimals)
+    {
+        (IIfaPriceFeed.PriceFeed[] memory infos, bool[] memory exists) =
+            ORACLE.getAssetsInfo(assetIds);
+
+        prices   = new int256[](assetIds.length);
+        decimals = new int8[](assetIds.length);
+
+        for (uint256 i = 0; i < assetIds.length; i++) {
+            if (!exists[i])
+                revert AssetNotSupported(assetIds[i]);
+
+            uint256 maxAge = maxPriceAge[assetIds[i]] > 0
+                ? maxPriceAge[assetIds[i]]
+                : DEFAULT_MAX_AGE;
+
+            if (!_isFresh(infos[i].lastUpdateTime, maxAge))
+                revert PriceFeedStale(
+                    assetIds[i],
+                    block.timestamp - infos[i].lastUpdateTime,
+                    maxAge
+                );
+
+            if (!_isReasonable(infos[i].price))
+                revert PriceDeviationExceeded(assetIds[i], infos[i].price);
+
+            prices[i]   = infos[i].price;
+            decimals[i] = infos[i].decimal;
+        }
+    }
+
+    /// @notice Get a derived cross-asset price.
+    ///         For example: CNGN priced in USDT terms.
+    /// @param  assetId0   The asset being priced
+    /// @param  assetId1   The denominator asset
+    /// @param  direction  Forward or Backward pair direction
+    function getCrossAssetPrice(
+        bytes32 assetId0,
+        bytes32 assetId1,
+        IIfaPriceFeed.PairDirection direction
+    )
+        external
+        view
+        returns (IIfaPriceFeed.DerivedPair memory pair)
+    {
+        return ORACLE.getPairbyId(assetId0, assetId1, direction);
+    }
+
+    // -------------------------------------------------------------------------
+    // Cached Price Read (Non-Critical Paths Only)
+    // -------------------------------------------------------------------------
+
+    /// @notice Return a cached price if within TTL, otherwise fetch fresh.
+    ///         For use in non-critical read paths only — not for liquidations,
+    ///         collateral valuation, or minting.
+    /// @param  assetId  The IFÁ Labs bytes32 asset identifier
+    function getCachedPrice(bytes32 assetId)
+        external
+        returns (int256 price, int8 decimal)
+    {
+        return _getCachedPrice(assetId);
+    }
+
+    // -------------------------------------------------------------------------
+    // Fallback Price Read
+    // -------------------------------------------------------------------------
+
+    /// @notice Attempt to return a verified price. If the primary feed is stale,
+    ///         fall back to the cache before reverting.
+    ///         Implement secondary oracle logic here for maximum resilience.
+    /// @param  assetId  The IFÁ Labs bytes32 asset identifier
+    function getVerifiedPriceWithFallback(bytes32 assetId)
+        external
+        view
+        returns (int256 price, int8 decimal, bool fromFallback)
+    {
+        (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+            ORACLE.getAssetInfo(assetId);
+
+        uint256 maxAge = maxPriceAge[assetId] > 0
+            ? maxPriceAge[assetId]
+            : DEFAULT_MAX_AGE;
+
+        // Primary path — fresh, valid price available
+        if (
+            exists &&
+            _isFresh(info.lastUpdateTime, maxAge) &&
+            _isReasonable(info.price)
+        ) {
+            return (info.price, info.decimal, false);
+        }
+
+        // Fallback path — primary stale or invalid
+        // Insert secondary oracle call here if available.
+        // Example:
+        //   (int256 fallbackPrice, bool fallbackFresh) = secondaryOracle.getPrice(assetId);
+        //   if (fallbackFresh) return (fallbackPrice, -18, true);
+
+        // If no fallback is available, revert cleanly
+        revert PriceFeedStale(
+            assetId,
+            block.timestamp - info.lastUpdateTime,
+            maxAge
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Guardian Functions
+    // -------------------------------------------------------------------------
+
+    /// @notice Unpause the protocol after an oracle issue has been resolved.
+    ///         Only callable by the guardian address.
+    function unpause() external {
+        if (msg.sender != guardian) revert NotGuardian();
+        paused = false;
+        emit ProtocolUnpaused(msg.sender, block.timestamp);
+    }
+
+    /// @notice Update the staleness threshold for a specific asset.
+    ///         Only callable by the guardian address.
+    function setMaxPriceAge(bytes32 assetId, uint256 maxAge) external {
+        if (msg.sender != guardian) revert NotGuardian();
+        maxPriceAge[assetId] = maxAge;
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal Helpers
+    // -------------------------------------------------------------------------
+
+    /// @dev Returns true if the price was updated within the allowed window.
+    function _isFresh(uint256 lastUpdateTime, uint256 maxAge)
+        internal
+        view
+        returns (bool)
+    {
+        return block.timestamp - lastUpdateTime <= maxAge;
+    }
+
+    /// @dev Returns true if the price is within ±MAX_DEVIATION_BPS of the peg.
+    ///      Only applies to USD stablecoins. Do not use for ETH or volatile assets.
+    function _isReasonable(int256 price)
+        internal
+        pure
+        returns (bool)
+    {
+        int256 deviation = price - EXPECTED_PEG;
+        if (deviation < 0) deviation = -deviation;
+        return uint256(deviation) <= uint256(EXPECTED_PEG) * MAX_DEVIATION_BPS / 10000;
+    }
+
+    /// @dev Fetch from cache if within TTL, otherwise read from oracle and
+    ///      update cache. Writes to storage — not a view function.
+    function _getCachedPrice(bytes32 assetId)
+        internal
+        returns (int256 price, int8 decimal)
+    {
+        CachedPrice storage cached = _priceCache[assetId];
+
+        if (
+            cached.cachedAt > 0 &&
+            block.timestamp - cached.cachedAt <= CACHE_TTL
+        ) {
+            return (cached.price, cached.decimal);
+        }
+
+        // Cache miss — fetch fresh from oracle
+        (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+            ORACLE.getAssetInfo(assetId);
+
+        if (!exists) revert AssetNotSupported(assetId);
+
+        _priceCache[assetId] = CachedPrice({
+            price:    info.price,
+            cachedAt: uint64(block.timestamp),
+            decimal:  info.decimal
+        });
+
+        emit CacheUpdated(assetId, info.price, block.timestamp);
+
+        return (info.price, info.decimal);
+    }
+}
+```
+
+---
+
+## Adapting This Contract
+
+This reference implementation is intentionally complete. When adapting it for your protocol, consider the following:
+
+**Remove what you don't need.** Not every protocol needs a cache, a guardian, and fallback logic simultaneously. Start from this reference and strip out the patterns that don't apply to your use case. A simpler contract with fewer moving parts is always preferable if it meets your requirements.
+
+**Review all constants for your risk profile.** `DEFAULT_MAX_AGE`, `EMERGING_MAX_AGE`, `MAX_DEVIATION_BPS`, and `CACHE_TTL` are starting points, not universal values. Set them based on your protocol's actual risk tolerance and the observed update cadence of the assets you're consuming.
+
+**Replace the guardian pattern with your governance system.** The single-address guardian is the simplest possible access control pattern. Production protocols typically use a timelock, multisig, or full governance contract for parameter updates. Swap `guardian` for whatever access control model your protocol already uses.
+
+**Implement secondary oracle logic in `getVerifiedPriceWithFallback`.** The fallback function has a clearly marked placeholder for a secondary oracle call. If your protocol requires maximum uptime, integrate a secondary source — Chainlink, Pyth, or a TWAP — at that point.
+
+**Add your protocol logic.** This contract has no deposit, borrow, swap, or settlement logic — those are yours to build on top of these price reading foundations.
+
+---
+
+## Deployment Checklist
+
+Before deploying to mainnet:
+
+<Steps>
+  <Step title="Verify oracle address">
+    Confirm `0xA9F17344689C2c2328F94464998db1d3e35B80dC` against the [Contract Addresses](/onchain-reference/smart-contracts/contract-addresses) reference page and Basescan.
+  </Step>
+  <Step title="Verify all asset IDs">
+    Hash each symbol string independently and compare against the [Supported Assets](/introduction/supported-assets) table. Run the Foundry test pattern from [Working with Asset IDs](/integration-guides/evm-smart-contracts/working-with-asset-ids).
+  </Step>
+  <Step title="Review risk parameters">
+    Confirm `DEFAULT_MAX_AGE`, `EMERGING_MAX_AGE`, `MAX_DEVIATION_BPS`, and `CACHE_TTL` are appropriate for your protocol's risk tolerance.
+  </Step>
+  <Step title="Replace guardian address">
+    Set the `guardian` constructor argument to your protocol's multisig or governance contract — not a development wallet.
+  </Step>
+  <Step title="Run a full test suite">
+    Test all price read paths including stale prices, missing assets, deviation breaches, and cache TTL expiry. Use Foundry's `vm.warp` to simulate time-based scenarios.
+  </Step>
+  <Step title="Benchmark gas costs">
+    Run Foundry's gas reporter against your adapted contract under realistic conditions before committing to the architecture.
+  </Step>
+  <Step title="Deploy to Base Sepolia first">
+    Test against the live testnet oracle — not just mocks — before mainnet deployment.
+  </Step>
+</Steps>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core Concepts" icon="book" href="/core-concepts/how-ifa-aggregates-prices">
+    Understand the oracle mechanics behind the price data your contracts consume.
+  </Card>
+
+  <Card title="MCP Server" icon="server" href="/integration-guides/mcp-server/what-is-the-ifa-labs-mcp-server">
+    Integrate IFÁ Labs price feeds into AI agents and developer tools via MCP.
+  </Card>
+</CardGroup>

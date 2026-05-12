@@ -1,0 +1,402 @@
+---
+title: "FAQ"
+description: "Answers to the most frequently asked questions about IFÁ Labs — what it is, how it works, how to integrate it, and where to get help."
+---
+
+Answers to the questions developers and protocol teams ask most often. If your question is not covered here, reach out via any [support channel](/support-and-community/get-help).
+
+---
+
+## General
+
+<AccordionGroup>
+  <Accordion title="What is IFÁ Labs?">
+    IFÁ Labs is a decentralized, multi-chain oracle network that delivers trustless, manipulation-resistant price feeds for stablecoins — directly on-chain, with no off-chain dependencies for price reads.
+
+    Unlike general-purpose oracles built around volatile assets like BTC and ETH, IFÁ Labs is purpose-built for stablecoins — including both global assets (USDT, USDC) and emerging market local stablecoins (cNGN in Nigeria, ZARP in South Africa, BRZ in Brazil).
+
+    See [What is IFÁ Labs?](/introduction/what-is-ifa-labs) for the full overview.
+  </Accordion>
+
+  <Accordion title="How is IFÁ Labs different from Chainlink or Pyth?">
+    Chainlink and Pyth are excellent general-purpose oracle networks. IFÁ Labs is not trying to replace them — it specializes where they generalize.
+
+    The key differences:
+
+    - **Local stablecoin coverage.** cNGN, ZARP, and BRZ have no reliable dedicated feeds on Chainlink or Pyth. IFÁ Labs is currently the only oracle providing trustless on-chain pricing for these assets.
+    - **Aggregation logic tuned for stablecoins.** General-purpose deviation thresholds are calibrated for volatile assets. IFÁ Labs uses tight, peg-aware thresholds that catch meaningful stablecoin moves without noise.
+    - **Regional data sources.** Accurate pricing for emerging market stablecoins requires data from local exchanges and forex providers. IFÁ Labs integrates these directly.
+    - **Fully on-chain reads.** Price reads require no transaction, no gas, and no off-chain request — a single `view` call returns the current price.
+
+    Many protocols use both: IFÁ Labs for stablecoin feeds, Chainlink or Pyth for volatile assets. See [Key Differentiators](/introduction/key-differentiators) for the full comparison.
+  </Accordion>
+
+  <Accordion title="Is IFÁ Labs fully on-chain?">
+    Yes. All price data is stored in audited EVM smart contracts and is readable via public `view` functions. There is no off-chain API, no middleware, and no centralized component in the read path.
+
+    Price reads cost no gas when called externally. Any address can read any feed at any time without permission, API keys, or fees.
+  </Accordion>
+
+  <Accordion title="Which chains does IFÁ Labs support?">
+    Currently live:
+
+    - **Base Mainnet** — primary production deployment
+    - **Base Sepolia** — recommended testnet
+    - **AssetChain Testnet** — RWA-focused ecosystem
+
+    Planned: AssetChain Mainnet, Solana, Optimism, Arbitrum, Polygon zkEVM, and additional EVM L2s based on ecosystem demand.
+
+    See [Supported Chains & Roadmap](/introduction/supported-chains-and-roadmap) for full details and timelines.
+  </Accordion>
+
+  <Accordion title="Which stablecoins does IFÁ Labs support?">
+    Currently supported:
+
+    | Asset | Symbol | Category |
+    | --- | --- | --- |
+    | Tether | USDT/USD | Global |
+    | USD Coin | USDC/USD | Global |
+    | Nigerian Naira Stablecoin | CNGN/USD | Emerging Market |
+    | South African Rand Stablecoin | ZARP/USD | Emerging Market |
+    | Brazilian Real Stablecoin | BRZ/USD | Emerging Market |
+    | Ethereum | ETH/USD | Reference Asset |
+
+    New assets are added on a rolling basis. See [Supported Assets](/reference/supported-assets) for the complete list including asset IDs.
+  </Accordion>
+
+  <Accordion title="Is IFÁ Labs free to use?">
+    Reading prices from IFÁ Labs is completely free. Price reads are `view` calls — they cost no gas and require no subscription, API key, or fee payment.
+
+    The only cost is standard network gas if you deploy your own contract that consumes IFÁ Labs feeds and writes data to your own contract's storage.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Integration
+
+<AccordionGroup>
+  <Accordion title="How do I read a price from IFÁ Labs in Solidity?">
+    Call `getAssetInfo` on the oracle contract with the asset's `bytes32` ID:
+
+    ```solidity
+        import "ifapricefeed-interface/IIfaPriceFeed.sol";
+    
+        IIfaPriceFeed constant ORACLE =
+            IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC); // Base Mainnet
+    
+        bytes32 constant USDT_ID =
+            0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d;
+    
+        function getUSDTPrice() external view returns (uint256) {
+            (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+                ORACLE.getAssetInfo(USDT_ID);
+    
+            require(exists, "Not supported");
+            require(block.timestamp - info.lastUpdateTime <= 3600, "Stale");
+    
+            return uint256(info.price) / 1e18; // human-readable price
+        }
+    ```
+
+    See [Read Latest Price](/integration-guides/evm-smart-contracts/read-latest-price) for full examples including batch reads and derived pairs.
+  </Accordion>
+
+  <Accordion title="What are asset IDs and how are they generated?">
+    Asset IDs are fixed `bytes32` identifiers generated by hashing the asset symbol string with `keccak256`:
+
+    ```solidity
+        bytes32 assetId = keccak256(abi.encodePacked("USDT/USD"));
+    ```
+
+    The symbol string format is uppercase with a forward slash: `"SYMBOL/USD"`. The same asset ID works on every IFÁ Labs deployment — no remapping between networks.
+
+    You can independently verify any asset ID by computing the hash yourself and comparing against the published value. See [Working with Asset IDs](/integration-guides/evm-smart-contracts/working-with-asset-ids) for full details.
+  </Accordion>
+
+  <Accordion title="How do I convert the raw price to a human-readable value?">
+    Divide `info.price` by `10^(-info.decimal)`. All current feeds return `decimal = -18`, so divide by `1e18`:
+
+    ```solidity
+        // Solidity
+        uint256 humanPrice = uint256(info.price) / 1e18;
+    ```
+
+    ```javascript
+        // JavaScript
+        const humanPrice = ethers.formatUnits(info.price, -info.decimal);
+    ```
+
+    ```python
+        # Python
+        from decimal import Decimal
+        human_price = Decimal(raw_price) / Decimal(10 ** -decimal)
+    ```
+
+    Always read `decimal` dynamically rather than hardcoding `18` — future assets may use different precision. See [Decimal Precision & Formatting](/core-concepts/decimal-precision-and-formatting) for full conversion guidance and edge cases.
+  </Accordion>
+
+  <Accordion title="What staleness threshold should I use?">
+    Set `MAX_PRICE_AGE` to at least 1.5× the heartbeat interval for each asset:
+
+    | Asset | Heartbeat | Minimum MAX\_PRICE\_AGE |
+    | --- | --- | --- |
+    | USDT/USD | 1 hour | 5,400s (90 min) |
+    | USDC/USD | 1 hour | 5,400s (90 min) |
+    | CNGN/USD | 2 hours | 10,800s (3 hrs) |
+    | ZARP/USD | 2 hours | 10,800s (3 hrs) |
+    | BRZ/USD | 2 hours | 10,800s (3 hrs) |
+    | ETH/USD | 1 hour | 5,400s (90 min) |
+
+    The 1.5× buffer accounts for heartbeat jitter — minor delays in relayer submission that mean heartbeats don't fire at exactly regular intervals.
+
+    For production deployments, run the cadence analysis script in [Price Appears Stale](/troubleshooting/price-appears-stale) to calibrate thresholds from real on-chain data rather than documentation estimates.
+  </Accordion>
+
+  <Accordion title="Can I get prices for multiple assets in one call?">
+    Yes. Use `getAssetsInfo` with an array of asset IDs:
+
+    ```solidity
+        bytes32[] memory ids = new bytes32[](3);
+        ids[0] = USDT_ASSET_ID;
+        ids[1] = CNGN_ASSET_ID;
+        ids[2] = ZARP_ASSET_ID;
+    
+        (IIfaPriceFeed.PriceFeed[] memory infos, bool[] memory exists) =
+            ORACLE.getAssetsInfo(ids);
+    ```
+
+    One call is significantly cheaper than N consecutive `getAssetInfo` calls. Always use batch reads when you need more than one price in the same transaction. See [Gas Optimization Tips](/integration-guides/evm-smart-contracts/gas-optimization-tips).
+  </Accordion>
+
+  <Accordion title="How do I price CNGN against USDT — or any asset against another?">
+    Use the derived pair functions. IFÁ Labs computes cross-asset prices on-chain using the two underlying USD feeds as intermediates:
+
+    ```solidity
+        // CNGN priced in USDT terms
+        IIfaPriceFeed.DerivedPair memory pair = ORACLE.getPairbyId(
+            CNGN_ASSET_ID,
+            USDT_ASSET_ID,
+            IIfaPriceFeed.PairDirection.Forward
+        );
+    ```
+
+    Any combination of the six supported assets is computable as a derived pair. See [Function Reference](/onchain-reference/smart-contracts/function-reference) for the full derived pair API.
+  </Accordion>
+
+  <Accordion title="Do I need a wallet or ETH to read prices?">
+    No. Price reads are `view` calls — they require no wallet, no ETH, and no transaction. You can read prices directly from a script, a frontend, or a block explorer with no signing or gas.
+
+    You only need ETH if you are deploying your own contract to a network where gas costs apply.
+  </Accordion>
+
+  <Accordion title="Can I use IFÁ Labs from JavaScript without writing Solidity?">
+    Yes. Use ethers.js or viem to call the oracle contract directly:
+
+    ```javascript
+        const { ethers } = require("ethers");
+    
+        const provider = new ethers.JsonRpcProvider("https://mainnet.base.org");
+        const oracle   = new ethers.Contract(
+          "0xA9F17344689C2c2328F94464998db1d3e35B80dC",
+          ["function getAssetInfo(bytes32) view returns ((int256 price, int8 decimal, uint256 lastUpdateTime), bool exists)"],
+          provider
+        );
+    
+        const [info, exists] = await oracle.getAssetInfo(
+          "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d"
+        );
+    
+        const price = ethers.formatUnits(info.price, -info.decimal);
+        console.log(`USDT/USD: $${price}`);
+    ```
+
+    See [Get Your First Price](/quickstart/get-your-first-price) for full off-chain examples in JavaScript, Python, and via Basescan.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Security
+
+<AccordionGroup>
+  <Accordion title="Have the IFÁ Labs contracts been audited?">
+    Yes. All oracle contracts were professionally audited by A&D Forensics in July 2025.
+
+    Audit result: no critical or high severity findings. Seven findings total — five low severity, two informational. All seven were resolved before mainnet deployment.
+
+    The full audit summary is at [AdForensics Audit Summary](/security-and-audits/adforensics-audit-summary). The complete report is available on request from [ifalabstudio@gmail.com](mailto:ifalabstudio@gmail.com) and in the [GitHub repository](https://github.com/IFA-Labs/oracle_contract).
+  </Accordion>
+
+  <Accordion title="Can IFÁ Labs modify or pause price feeds?">
+    No. The oracle contracts are immutable — no upgrade mechanism, no proxy pattern, and no admin keys that can modify stored prices or pause feed updates.
+
+    Once a price is written to contract storage by an authorized relayer, it remains there until the next legitimate update. IFÁ Labs cannot retroactively alter historical prices or freeze a feed.
+  </Accordion>
+
+  <Accordion title="What happens if a relayer submits a wrong price?">
+    Multiple layers of protection prevent this:
+
+    - Prices are aggregated from multiple independent sources before submission — no single source determines the output
+    - Outlier detection filters anomalous data points before consensus calculation
+    - A weighted median algorithm makes the final price resistant to minority manipulation
+    - Zero-price and peg bounds validation reject obviously wrong values before on-chain submission
+    - Decentralized relayers independently verify the aggregated price before signing
+
+    See [Data Integrity Mechanisms](/security-and-audits/data-integrity-mechanisms) for the full seven-layer defense architecture.
+  </Accordion>
+
+  <Accordion title="How do I verify IFÁ Labs prices independently?">
+    Five methods are available — all using public data with no trust in IFÁ Labs required:
+
+    1. Read the current on-chain price and compare against external market sources
+    2. Independently compute any asset ID using `keccak256` and verify it matches the published value
+    3. Query historical `PriceUpdated` events and verify update cadence and price progression
+    4. Compare prices across chains to verify cross-chain consistency
+    5. Clone the audited commit and compare compiled bytecode against the deployed contract
+
+    Full instructions for all five methods: [Verification Proofs](/security-and-audits/verification-proofs).
+  </Accordion>
+
+  <Accordion title="How do I report a security vulnerability?">
+    Email [security@ifalabs.com](mailto:security@ifalabs.com) with a description of the issue, reproduction steps, and your assessment of severity. Do not disclose security issues publicly before coordinating with IFÁ Labs.
+
+    We acknowledge all reports within 48 hours. See [Report a Vulnerability](/security-and-audits/report-a-vulnerability) for the full responsible disclosure policy.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## MCP Server
+
+<AccordionGroup>
+  <Accordion title="What is the IFÁ Labs MCP Server?">
+    The IFÁ Labs MCP Server exposes the full oracle infrastructure through the Model Context Protocol — an open standard that lets AI assistants and coding tools call external tools and data sources directly.
+
+    In practice: you can ask Claude, Cursor, Windsurf, TRAE, or any MCP-compatible client for live stablecoin prices, asset IDs, feed freshness checks, and network configuration — and get verified on-chain data back in seconds, without leaving your editor or AI assistant.
+
+    See [What is the IFÁ Labs MCP Server?](/integration-guides/mcp-server/what-is-the-ifa-labs-mcp-server) for full details.
+  </Accordion>
+
+  <Accordion title="How do I install the MCP server?">
+    ```bash
+        npm install -g @ifalabs/mcp-server
+    ```
+
+    Then add it to your MCP client's configuration. For Claude Desktop:
+
+    ```json
+        {
+          "mcpServers": {
+            "ifalabs": {
+              "command": "ifa-mcp",
+              "args": ["--network", "base-mainnet"]
+            }
+          }
+        }
+    ```
+
+    Full installation instructions for every supported client: [MCP Server Installation & Setup](/integration-guides/mcp-server/installation-and-setup).
+  </Accordion>
+
+  <Accordion title="Which MCP clients does IFÁ Labs support?">
+    Any MCP-compatible client. Officially tested and documented:
+
+    - Claude Desktop
+    - Cursor
+    - Windsurf
+    - TRAE
+    - Zed
+    - Continue
+    - LangChain, CrewAI, AutoGen (programmatic)
+
+    See [MCP Client Compatibility](/integration-guides/mcp-server/mcp-client-compatibility) for client-specific configuration and known limitations.
+  </Accordion>
+
+  <Accordion title="Does the MCP server cost anything to use?">
+    No. The MCP server reads from the same free, public oracle contracts as any other integration. No API keys, no subscription, and no gas required.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Assets and Feeds
+
+<AccordionGroup>
+  <Accordion title="How do I request a new stablecoin feed?">
+    Contact IFÁ Labs with the following:
+
+    - Token contract address on all relevant chains
+    - Backing mechanism and reserve proof or documentation
+    - Current daily trading volume across all venues
+    - The protocol or use case driving the request
+
+    Reach out via [support@ifalabs.com](mailto:support@ifalabs.com), [Telegram](https://t.me/ifalabs), or [GitHub Issues](https://github.com/IFA-Labs/oracle_contract/issues).
+
+    IFÁ Labs prioritizes emerging market stablecoins in Africa, Latin America, and Southeast Asia. New assets are reviewed and deployed on a rolling basis.
+  </Accordion>
+
+  <Accordion title="Why is my price feed showing as stale?">
+    The most likely cause is that your `MAX_PRICE_AGE` threshold is tighter than the asset's natural update cadence.
+
+    During stable market conditions, IFÁ Labs feeds update only when the price moves beyond the deviation threshold — not continuously. A feed that appears stale by your threshold may be accurate and working correctly.
+
+    Set `MAX_PRICE_AGE` to at least 1.5× the heartbeat interval for the asset. Then run the cadence analysis script in [Price Appears Stale](/troubleshooting/price-appears-stale) to calibrate from real on-chain data.
+
+    If the feed age significantly exceeds the heartbeat interval across all assets simultaneously, a relayer issue may be affecting the deployment. Check the [Telegram](https://t.me/ifalabs) for incident announcements.
+  </Accordion>
+
+  <Accordion title="Are asset IDs the same across all networks?">
+    Yes. Asset IDs are generated from the symbol string using `keccak256` — a deterministic computation that produces the same output regardless of which chain you are on. The `bytes32` identifier for USDT/USD on Base Mainnet is identical on Base Sepolia and AssetChain Testnet.
+
+    The only thing that changes between networks is the oracle contract address. See [Contract Addresses](/onchain-reference/smart-contracts/contract-addresses) for the address per network.
+  </Accordion>
+
+  <Accordion title="What is ETH/USD doing in a stablecoin oracle?">
+    ETH/USD is included as a reference asset to enable derived pair calculations between stablecoins and ETH — for example, pricing USDC in ETH terms or ETH in CNGN terms.
+
+    IFÁ Labs is stablecoin-first. ETH is not a primary feed target — it is there to make cross-asset pricing more flexible for protocols that need it. Do not apply stablecoin-specific checks (like a \$1.00 peg deviation guard) to ETH/USD.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Community and Contribution
+
+<AccordionGroup>
+  <Accordion title="How do I stay updated on new deployments and assets?">
+    Three channels:
+
+    - **X:** [@ifalabs](https://x.com/ifalabs) — deployment announcements, new assets, ecosystem news
+    - **Telegram:** [t.me/ifalabs](https://t.me/ifalabs) — real-time updates and incident announcements
+    - **GitHub:** [Watch the repository](https://github.com/IFA-Labs/oracle_contract) — contract changes and releases
+
+    The [Changelog](/reference/changelog) is updated for every significant release.
+  </Accordion>
+
+  <Accordion title="Can I contribute to IFÁ Labs?">
+    Yes. Pull requests are welcome for bug fixes, test coverage, gas optimizations, documentation improvements, and new integration examples.
+
+    See [GitHub & Bug Reports](/support-and-community/github-and-bug-reports) for the full contribution workflow, repository structure, and contribution areas.
+  </Accordion>
+
+  <Accordion title="Is there a bug bounty program?">
+    A formal bug bounty program is under development. Until it launches, critical and high severity findings submitted through responsible disclosure will be reviewed for discretionary rewards based on impact and report quality.
+
+    See [Report a Vulnerability](/security-and-audits/report-a-vulnerability) for the current disclosure policy and contact channels.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Still Have Questions?
+
+<CardGroup cols={2}>
+  <Card title="Get Help" icon="message" href="/support-and-community/get-help">
+    Every support channel and what each one is best for.
+  </Card>
+
+  <Card title="GitHub & Bug Reports" icon="github" href="/support-and-community/github-and-bug-reports">
+    Report bugs, request features, and contribute to IFÁ Labs.
+  </Card>
+</CardGroup>

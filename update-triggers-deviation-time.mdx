@@ -1,0 +1,288 @@
+---
+title: "Update Triggers (Deviation / Time)"
+description: "When and why IFÁ Labs pushes price updates on-chain — the hybrid deviation and heartbeat model explained in full."
+---
+
+Every on-chain price update costs gas. Updating too frequently wastes relayer resources and increases costs for the protocol. Updating too infrequently leaves stale data on-chain and exposes consuming protocols to risk. IFÁ Labs resolves this tension with a hybrid trigger model — combining deviation-based and time-based conditions calibrated specifically for stablecoin behavior.
+
+Understanding this model is important for anyone building protocols that consume IFÁ Labs feeds — particularly when setting staleness thresholds and designing fallback logic.
+
+---
+
+## The Two Trigger Conditions
+
+A price update is submitted on-chain when **either** of the following conditions is met:
+
+### Condition 1: Deviation Trigger
+
+The new aggregated price deviates from the current on-chain value by more than the configured deviation threshold.
+
+```text
+│ new_aggregated_price - current_onchain_price │
+────────────────────────────────────────────── > deviation_threshold
+           current_onchain_price
+```
+
+When this condition fires, it means the market has moved meaningfully enough to warrant an update — regardless of how recently the last update occurred.
+
+### Condition 2: Heartbeat Trigger
+
+The time elapsed since the last on-chain update exceeds the configured heartbeat interval — the maximum allowed time between updates.
+
+```text
+block.timestamp - last_update_time > heartbeat_interval
+```
+
+When this condition fires, it means too much time has passed without an update — even if the price hasn't moved. This guarantees that `lastUpdateTime` never becomes indefinitely stale during periods of perfect market stability.
+
+### How They Work Together
+
+```text
+Every aggregation round:
+
+  Is │ new_price - onchain_price │ / onchain_price > deviation_threshold?
+  │
+  ├── YES → Submit update immediately
+  │
+  └── NO  → Has heartbeat_interval elapsed since last update?
+              │
+              ├── YES → Submit update (heartbeat)
+              │
+              └── NO  → No update needed this round
+```
+
+The result: updates fire exactly when they should — when the price moves or when enough time has passed — and never more often than necessary.
+
+---
+
+## Per-Asset Configuration
+
+Deviation thresholds and heartbeat intervals are configured independently per asset. A single global setting would be either too tight for some assets or too loose for others.
+
+| Asset | Deviation Threshold | Heartbeat Interval | Rationale |
+| --- | --- | --- | --- |
+| **USDT/USD** | 0.1% | 1 hour | Deep liquidity, tight peg — small moves are meaningful |
+| **USDC/USD** | 0.1% | 1 hour | Same profile as USDT |
+| **CNGN/USD** | 0.3% | 2 hours | Emerging market asset — slightly wider tolerance for natural micro-fluctuation |
+| **ZARP/USD** | 0.3% | 2 hours | Same profile as CNGN |
+| **BRZ/USD** | 0.3% | 2 hours | Same profile as CNGN |
+| **ETH/USD** | 0.5% | 1 hour | Reference asset — wider deviation threshold appropriate for non-pegged asset |
+
+<Note>
+  These values represent the current configuration and may be adjusted as the network matures and empirical update data informs calibration. Follow [@ifalabs](https://x.com/ifalabs) for announcements of threshold changes.
+</Note>
+
+---
+
+## Why These Thresholds Matter for Protocol Developers
+
+### Setting Your Staleness Threshold
+
+Your protocol's `MAX_PRICE_AGE` staleness check needs to account for the heartbeat interval of the assets you're consuming. If you set `MAX_PRICE_AGE` tighter than the heartbeat interval, your protocol will frequently reject valid, accurate prices simply because the market hasn't moved enough to trigger a deviation update.
+
+```text
+Rule of thumb:
+
+  MAX_PRICE_AGE  ≥  heartbeat_interval × 1.5
+
+For USDT/USD (1hr heartbeat):  MAX_PRICE_AGE ≥ 90 minutes
+For CNGN/USD (2hr heartbeat):  MAX_PRICE_AGE ≥ 3 hours
+```
+
+The 1.5x buffer accounts for:
+
+- Minor delays in relayer submission during network congestion
+- Block timestamp variance
+- The time between the heartbeat condition being met and the transaction being mined
+
+Starting at 2x the heartbeat interval and tightening based on observed update patterns in production is the safest approach.
+
+---
+
+### Reading Update Cadence From On-Chain Data
+
+Before setting staleness thresholds, observe the actual update cadence for your target asset in production. The `PriceUpdated` event log is the authoritative source:
+
+```javascript
+const { ethers } = require("ethers");
+
+const ORACLE_ADDRESS = "0xA9F17344689C2c2328F94464998db1d3e35B80dC";
+const provider = new ethers.JsonRpcProvider("https://mainnet.base.org");
+
+const oracle = new ethers.Contract(ORACLE_ADDRESS, [
+  "event PriceUpdated(bytes32 indexed assetId, int256 price, int8 decimal, uint64 timestamp)"
+], provider);
+
+const CNGN_ASSET_ID =
+  "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a";
+
+async function getUpdateCadence(assetId, lookbackBlocks = 10000) {
+  const currentBlock = await provider.getBlockNumber();
+
+  const events = await oracle.queryFilter(
+    oracle.filters.PriceUpdated(assetId),
+    currentBlock - lookbackBlocks,
+    currentBlock
+  );
+
+  if (events.length < 2) {
+    console.log("Insufficient events for cadence analysis");
+    return;
+  }
+
+  const intervals = [];
+  for (let i = 1; i < events.length; i++) {
+    const delta = Number(events[i].args.timestamp) -
+                  Number(events[i - 1].args.timestamp);
+    intervals.push(delta);
+  }
+
+  const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+  const max = Math.max(...intervals);
+  const min = Math.min(...intervals);
+
+  console.log(`Update cadence for asset over last ${lookbackBlocks} blocks:`);
+  console.log(`  Average interval:  ${Math.round(avg)}s (${(avg/60).toFixed(1)} min)`);
+  console.log(`  Longest interval:  ${max}s (${(max/60).toFixed(1)} min)`);
+  console.log(`  Shortest interval: ${min}s (${(min/60).toFixed(1)} min)`);
+  console.log(`  Total updates:     ${events.length}`);
+  console.log(`\nRecommended MAX_PRICE_AGE: ${Math.round(max * 1.5)}s`);
+}
+
+getUpdateCadence(CNGN_ASSET_ID);
+```
+
+Run this script against each asset you consume before finalising your staleness threshold configuration. The longest observed interval multiplied by 1.5 is a reliable starting point.
+
+---
+
+## Deviation Trigger Mechanics in Detail
+
+### What Counts as a Deviation
+
+The deviation calculation compares the new aggregated price against the **current on-chain stored value** — not the previous aggregation round's result. This distinction matters:
+
+```text
+Scenario:
+  On-chain price:           1.000000
+  Last aggregation result:  1.000080  (no update triggered — below threshold)
+  Current aggregation:      1.001200  (deviation from on-chain = 0.12%)
+
+  0.12% > 0.10% threshold → Update submitted
+
+  New on-chain price: 1.001200
+```
+
+The deviation is always measured against the last **submitted** on-chain value. This means small moves that individually fall below the threshold can accumulate and eventually trigger an update when the total drift from the last on-chain value exceeds the threshold.
+
+---
+
+### Deviation vs. Peg
+
+The deviation trigger fires on movement relative to the **last on-chain price** — not relative to the \$1.00 peg. These are different things:
+
+```text
+On-chain price:   0.995000  (already 0.5% off peg — submitted earlier)
+New aggregation:  0.996000  (moved +0.10% from on-chain value)
+
+Deviation from on-chain: 0.10% → triggers update if threshold is 0.10%
+Deviation from peg:      0.40% → would trigger a peg circuit breaker
+```
+
+Protocols implementing peg deviation circuit breakers should check the price against the \$1.00 peg directly — not rely on the oracle's deviation trigger logic for that protection. See [Verify Price Integrity](/quickstart/verify-price-integrity) for circuit breaker implementation.
+
+---
+
+## Heartbeat Trigger Mechanics in Detail
+
+### The Purpose of the Heartbeat
+
+Without a heartbeat trigger, a stablecoin that sits perfectly at its peg for days would never update. `lastUpdateTime` would grow indefinitely stale, and any protocol with a reasonable staleness check would start rejecting the price — even though the price is accurate.
+
+The heartbeat prevents this by guaranteeing a maximum gap between updates regardless of price movement.
+
+### Heartbeat Jitter
+
+In practice, heartbeat updates do not fire at perfectly regular intervals. Several factors introduce jitter:
+
+- **Gas price variability** — relayers may delay submission slightly during high gas periods to minimise costs
+- **Block time variability** — the exact block in which a transaction lands varies
+- **Aggregation round timing** — the heartbeat condition is evaluated per aggregation round, not continuously
+
+Jitter is typically small — seconds to a few minutes — but it is the reason your `MAX_PRICE_AGE` should include a buffer above the nominal heartbeat interval rather than matching it exactly.
+
+```text
+Example: USDT/USD heartbeat = 3,600 seconds
+
+Observed submission times:
+  Round N:    T + 0s
+  Round N+1:  T + 3,587s  (13 seconds early — gas was cheap)
+  Round N+2:  T + 3,624s  (24 seconds late — minor congestion)
+  Round N+3:  T + 3,601s  (1 second late — normal)
+
+Recommendation: Set MAX_PRICE_AGE to 5,400s (90 minutes) for USDT/USD
+                to comfortably accommodate this jitter.
+```
+
+---
+
+## Deviation and Heartbeat in Monitoring
+
+When building off-chain monitoring for IFÁ Labs feeds, the trigger model informs what alert thresholds are meaningful:
+
+```javascript
+// Monitoring logic informed by trigger model
+const THRESHOLDS = {
+  "USDT/USD": { deviation: 0.001, heartbeat: 3600 },
+  "USDC/USD": { deviation: 0.001, heartbeat: 3600 },
+  "CNGN/USD": { deviation: 0.003, heartbeat: 7200 },
+  "ZARP/USD": { deviation: 0.003, heartbeat: 7200 },
+  "BRZ/USD":  { deviation: 0.003, heartbeat: 7200 },
+  "ETH/USD":  { deviation: 0.005, heartbeat: 3600 },
+};
+
+function shouldAlert(asset, ageSeconds, priceChange) {
+  const config = THRESHOLDS[asset];
+  if (!config) return false;
+
+  // Alert if age exceeds heartbeat + 20% buffer
+  if (ageSeconds > config.heartbeat * 1.2) {
+    return `STALE: ${asset} not updated in ${ageSeconds}s (heartbeat: ${config.heartbeat}s)`;
+  }
+
+  // Alert if price moved but update hasn't arrived yet
+  if (Math.abs(priceChange) > config.deviation && ageSeconds > 300) {
+    return `DELAYED: ${asset} moved ${(priceChange * 100).toFixed(3)}% but no update in ${ageSeconds}s`;
+  }
+
+  return null;
+}
+```
+
+---
+
+## Summary
+
+| Concept | Key Point |
+| --- | --- |
+| Deviation trigger | Fires when new price moves \> threshold from last on-chain value |
+| Heartbeat trigger | Fires when max time since last update is exceeded |
+| Either condition | An update submits when deviation OR heartbeat fires — whichever comes first |
+| Per-asset config | Thresholds and intervals are calibrated per asset — not global |
+| Staleness threshold | Set your `MAX_PRICE_AGE` to at least 1.5× the heartbeat interval |
+| Jitter buffer | Heartbeats don't fire at exact intervals — always include a buffer |
+| Deviation vs. peg | The deviation trigger measures from last on-chain price, not \$1.00 peg |
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Decimal Precision & Formatting" icon="hashtag" href="/core-concepts/decimal-precision-and-formatting">
+    Learn how IFÁ Labs scales and formats price data for on-chain consumption.
+  </Card>
+
+  <Card title="Handle Stale Data" icon="clock" href="/integration-guides/evm-smart-contracts/handle-stale-data">
+    Implement staleness guards informed by the trigger model documented here.
+  </Card>
+</CardGroup>

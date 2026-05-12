@@ -1,0 +1,127 @@
+---
+title: "What is the IFÁ Labs MCP Server?"
+description: "Query live stablecoin price feeds directly from AI agents, developer tools, and LLM-powered applications using the IFÁ Labs MCP Server."
+---
+
+The IFÁ Labs MCP Server exposes the full IFÁ Labs oracle infrastructure through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io) — an open standard that lets AI agents, coding assistants, and LLM-powered applications call external tools and data sources directly.
+
+In practical terms: instead of writing a contract, running a script, or opening Basescan to check a stablecoin price, you can query IFÁ Labs price feeds conversationally — from Claude, Cursor, Windsurf, TRAE, or any MCP-compatible client — and get verified, live on-chain data back in seconds.
+
+---
+
+## What MCP Is
+
+Model Context Protocol is an open standard developed by Anthropic that defines how AI models communicate with external tools and data sources. It works like this:
+
+1. An MCP server exposes a set of named tools — functions with defined inputs and outputs.
+2. An MCP client — a coding assistant, an AI agent, an LLM application — discovers those tools and can call them during a conversation or workflow.
+3. The server executes the tool call, fetches real data, and returns a structured result.
+4. The model uses that result to inform its response.
+
+The result is AI tooling that works with live, verifiable data — not hallucinated values or stale training knowledge.
+
+---
+
+## What the IFÁ Labs MCP Server Exposes
+
+The IFÁ Labs MCP Server provides direct access to the full oracle infrastructure:
+
+| Tool | Description |
+| --- | --- |
+| `get_asset_price` | Fetch the current on-chain price for a single supported asset |
+| `get_multiple_prices` | Fetch prices for multiple assets in a single call |
+| `get_derived_pair` | Get a cross-asset price — e.g. CNGN priced in USDT terms |
+| `get_supported_assets` | List all currently supported assets and their IDs |
+| `get_asset_id` | Resolve a symbol string to its `bytes32` asset ID |
+| `check_price_freshness` | Check the age of a price feed and whether it meets a given staleness threshold |
+| `get_network_info` | Return contract addresses and RPC details for all supported networks |
+
+Every tool call reads directly from the deployed on-chain oracle contracts. No cached middleware, no synthetic data, no approximations.
+
+---
+
+## Who It's For
+
+**Smart contract developers** using AI coding assistants can query live prices mid-session — confirming what CNGN/USD is trading at right now, verifying an asset ID before hardcoding it, or checking feed freshness before deploying to mainnet — without leaving their editor.
+
+**DeFi protocol teams** running automated workflows can integrate IFÁ Labs price feeds into agent-based pipelines — monitoring feeds, triggering alerts, or feeding price data into downstream logic — without building a custom integration from scratch.
+
+**AI application developers** building LLM-powered financial tools can ground their applications in verified on-chain stablecoin pricing data, accessed through a standard protocol that works with any MCP-compatible model or framework.
+
+**Researchers and analysts** can query historical and live stablecoin price data conversationally, without writing scripts or navigating block explorers.
+
+---
+
+## Supported MCP Clients
+
+The IFÁ Labs MCP Server works with any MCP-compatible client:
+
+| Client | Type |
+| --- | --- |
+| [Claude](https://claude.ai) | AI assistant — Anthropic |
+| [Cursor](https://cursor.com) | AI coding assistant |
+| [Windsurf](https://codeium.com/windsurf) | AI coding assistant |
+| [TRAE](https://trae.ai) | AI coding assistant |
+| [Zed](https://zed.dev) | AI-powered editor |
+| [Continue](https://continue.dev) | Open-source AI coding assistant |
+| Any MCP-compatible client | Custom agents, LangChain, CrewAI, and other frameworks |
+
+---
+
+## A Practical Example
+
+Here's what using the IFÁ Labs MCP Server looks like inside an MCP-compatible coding assistant:
+
+**Developer prompt:**
+
+> "What is the current CNGN/USD price on Base Mainnet? Is the feed fresh?"
+
+**MCP tool calls triggered:**
+
+1. `get_asset_price` → `{ asset: "CNGN/USD", network: "base-mainnet" }`
+2. `check_price_freshness` → `{ asset: "CNGN/USD", max_age_seconds: 3600 }`
+
+**Result returned to the model:**
+
+```json
+{
+  "asset": "CNGN/USD",
+  "price": "0.000613",
+  "raw_price": "613000000000000",
+  "decimal": -18,
+  "last_updated": "2025-07-31T14:22:11Z",
+  "age_seconds": 412,
+  "is_fresh": true,
+  "network": "base-mainnet"
+}
+```
+
+**Model response to developer:**
+
+> The CNGN/USD price on Base Mainnet is currently \$0.000613. The feed was last updated 412 seconds ago and is within the 1-hour freshness threshold.
+
+No scripts. No block explorer. No manual RPC calls. Live on-chain data, in the flow of a development conversation.
+
+---
+
+## Why This Matters for Stablecoin Infrastructure
+
+Most oracle data accessible via AI tools today comes from training data — which has a cutoff date and cannot reflect current market conditions — or from general-purpose web searches that may pull from unreliable sources.
+
+The IFÁ Labs MCP Server changes that for stablecoin pricing in emerging markets. It gives any MCP-compatible tool access to the same verified, manipulation-resistant, on-chain price data that production DeFi protocols rely on — with the same trust model, accessed through a standardised interface.
+
+For developers building on African, Latin American, or Southeast Asian stablecoins, this means AI tooling that actually knows what CNGN, ZARP, and BRZ are worth right now.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation & Setup" icon="wrench" href="/integration-guides/mcp-server/installation-and-setup">
+    Connect the IFÁ Labs MCP Server to your preferred client in minutes.
+  </Card>
+
+  <Card title="Available Tools" icon="wrench" href="/integration-guides/mcp-server/available-tools">
+    Full reference for every tool the MCP server exposes.
+  </Card>
+</CardGroup>

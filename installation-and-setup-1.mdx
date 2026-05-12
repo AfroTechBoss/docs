@@ -1,0 +1,319 @@
+---
+title: "Installation & Setup"
+description: "Connect the IFÁ Labs MCP Server to your preferred client — Claude, Cursor, Windsurf, TRAE, and any other MCP-compatible tool."
+---
+
+This page walks through installing the IFÁ Labs MCP Server and connecting it to every major MCP-compatible client. The server runs locally on your machine and communicates with IFÁ Labs' deployed oracle contracts on your behalf.
+
+---
+
+## Prerequisites
+
+Before installing, confirm you have the following:
+
+- **Node.js v18 or higher** — the MCP server is a Node.js process. Check your version with `node --version`.
+- **npm or yarn** — for installation.
+- An MCP-compatible client — Claude Desktop, Cursor, Windsurf, TRAE, or any other listed in [Supported MCP Clients](/integration-guides/mcp-server/what-is-the-ifa-labs-mcp-server#supported-mcp-clients).
+
+<Note>
+  No wallet, private key, or gas is required to run the IFÁ Labs MCP Server. All oracle reads are view calls — free, read-only, and require no on-chain signing.
+</Note>
+
+---
+
+## Step 1: Install the MCP Server
+
+<Tabs>
+  <Tab title="npm">
+    ```bash
+        npm install -g @ifalabs/mcp-server
+    ```
+  </Tab>
+  <Tab title="yarn">
+    ```bash
+        yarn global add @ifalabs/mcp-server
+    ```
+  </Tab>
+  <Tab title="Run without installing">
+    ```bash
+        npx @ifalabs/mcp-server
+    ```
+
+    Use this to try the server without a global install. For persistent client integrations, a global install is recommended.
+  </Tab>
+</Tabs>
+
+Verify the installation:
+
+```bash
+ifa-mcp --version
+```
+
+---
+
+## Step 2: Configure Your Client
+
+Select your MCP client below and follow the configuration steps.
+
+<Tabs>
+  <Tab title="Claude Desktop">
+    Claude Desktop supports MCP servers via a JSON configuration file.
+
+    <Steps>
+      <Step title="Locate the config file">
+        Open or create the Claude Desktop MCP configuration file:
+
+        - **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+        - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+        - **Linux:** `~/.config/Claude/claude_desktop_config.json`
+      </Step>
+      <Step title="Add the IFÁ Labs server">
+        Add the following to your `mcpServers` block:
+
+        ```json
+                {
+                  "mcpServers": {
+                    "ifalabs": {
+                      "command": "ifa-mcp",
+                      "args": ["--network", "base-mainnet"]
+                    }
+                  }
+                }
+        ```
+      </Step>
+      <Step title="Restart Claude Desktop">
+        Fully quit and relaunch Claude Desktop. The IFÁ Labs tools will appear in the tools panel on the next launch.
+      </Step>
+      <Step title="Verify the connection">
+        In a new Claude conversation, ask:
+
+        > "What is the current USDT/USD price from IFÁ Labs?"
+
+        Claude should call the `get_asset_price` tool and return a live on-chain value.
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="Cursor">
+    Cursor supports MCP servers via its settings panel or a project-level config file.
+
+    <Steps>
+      <Step title="Open MCP settings">
+        Go to **Cursor Settings** → **Features** → **MCP Servers** → **Add New MCP Server**.
+      </Step>
+      <Step title="Configure the server">
+        Fill in the following fields:
+
+        - **Name:** `ifalabs`
+        - **Type:** `command`
+        - **Command:** `ifa-mcp --network base-mainnet`
+      </Step>
+      <Step title="Save and verify">
+        Save the settings. Open a new Cursor chat and ask:
+
+        > "Use IFÁ Labs to get the current CNGN/USD price."
+
+        Cursor should call the MCP tool and return a live price.
+      </Step>
+    </Steps>
+
+    **Alternatively**, add a `.cursor/mcp.json` file to your project root for project-scoped configuration:
+
+    ```json
+        {
+          "mcpServers": {
+            "ifalabs": {
+              "command": "ifa-mcp",
+              "args": ["--network", "base-mainnet"]
+            }
+          }
+        }
+    ```
+  </Tab>
+  <Tab title="Windsurf">
+    <Steps>
+      <Step title="Open MCP configuration">
+        Go to **Windsurf Settings** → **MCP** → **Add Server**.
+      </Step>
+      <Step title="Add the server config">
+        ```json
+                {
+                  "mcpServers": {
+                    "ifalabs": {
+                      "command": "ifa-mcp",
+                      "args": ["--network", "base-mainnet"]
+                    }
+                  }
+                }
+        ```
+      </Step>
+      <Step title="Restart and verify">
+        Restart Windsurf and confirm the IFÁ Labs server appears in the active MCP servers list.
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="TRAE">
+    <Steps>
+      <Step title="Open MCP settings">
+        Go to **TRAE Settings** → **MCP Servers** → **Add Server**.
+      </Step>
+      <Step title="Add the server config">
+        ```json
+                {
+                  "mcpServers": {
+                    "ifalabs": {
+                      "command": "ifa-mcp",
+                      "args": ["--network", "base-mainnet"]
+                    }
+                  }
+                }
+        ```
+      </Step>
+      <Step title="Restart and verify">
+        Restart TRAE and verify the server is active before starting a new session.
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="Other MCP Clients">
+    Any MCP-compatible client that supports stdio-based servers can connect to the IFÁ Labs MCP Server using the following configuration:
+
+    ```json
+        {
+          "mcpServers": {
+            "ifalabs": {
+              "command": "ifa-mcp",
+              "args": ["--network", "base-mainnet"]
+            }
+          }
+        }
+    ```
+
+    Refer to your client's documentation for where to place this configuration.
+  </Tab>
+</Tabs>
+
+---
+
+## Configuration Options
+
+The IFÁ Labs MCP Server accepts the following arguments:
+
+| Argument | Values | Default | Description |
+| --- | --- | --- | --- |
+| `--network` | `base-mainnet`, `base-sepolia`, `assetchain-testnet` | `base-mainnet` | The network to read oracle data from |
+| `--rpc-url` | Any valid RPC URL | Network default | Override the default RPC endpoint |
+| `--max-price-age` | Integer (seconds) | `3600` | Default staleness threshold for freshness checks |
+| `--port` | Integer | `3000` | Port for SSE transport mode (if applicable) |
+| `--log-level` | `silent`, `error`, `info`, `debug` | `error` | Logging verbosity |
+
+**Example — connect to Base Sepolia for development:**
+
+```bash
+ifa-mcp --network base-sepolia --log-level info
+```
+
+**Example — use a custom RPC provider:**
+
+```bash
+ifa-mcp --network base-mainnet --rpc-url https://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY
+```
+
+<Tip>
+  For production workflows, use a dedicated RPC provider — Alchemy, QuickNode, or Infura — rather than the public Base RPC endpoint. Public endpoints are rate-limited and not suitable for high-frequency tool calls.
+</Tip>
+
+---
+
+## Connecting to Testnet
+
+For development and testing against live testnet oracle data, point the server at Base Sepolia:
+
+```json
+{
+  "mcpServers": {
+    "ifalabs": {
+      "command": "ifa-mcp",
+      "args": ["--network", "base-sepolia"]
+    }
+  }
+}
+```
+
+All supported assets are available on Base Sepolia with the same asset IDs as mainnet. Prices reflect testnet oracle state and may differ from mainnet values.
+
+---
+
+## Using with Custom Agents and Frameworks
+
+For LangChain, CrewAI, AutoGen, or any custom MCP-compatible agent framework, the server can be connected programmatically:
+
+```javascript
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+const transport = new StdioClientTransport({
+  command: "ifa-mcp",
+  args: ["--network", "base-mainnet"],
+});
+
+const client = new Client(
+  { name: "my-agent", version: "1.0.0" },
+  { capabilities: {} }
+);
+
+await client.connect(transport);
+
+// List available tools
+const tools = await client.listTools();
+console.log(tools);
+
+// Call a tool
+const result = await client.callTool({
+  name: "get_asset_price",
+  arguments: { asset: "USDT/USD", network: "base-mainnet" },
+});
+
+console.log(result);
+```
+
+---
+
+## Verifying the Connection
+
+Once configured, verify the server is connected and returning live data with these test prompts in your client:
+
+| Test Prompt | Expected Behaviour |
+| --- | --- |
+| "List all supported IFÁ Labs assets" | Returns all asset symbols and IDs via `get_supported_assets` |
+| "What is the current USDT/USD price from IFÁ Labs?" | Returns live price via `get_asset_price` |
+| "Is the CNGN/USD feed fresh?" | Returns age and freshness status via `check_price_freshness` |
+| "Get the ZARP/USD asset ID" | Returns `0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8` via `get_asset_id` |
+
+If any of these fail, work through the [troubleshooting steps](#troubleshooting) below.
+
+---
+
+## Troubleshooting
+
+**`ifa-mcp: command not found`** The global install did not complete successfully or the npm global bin directory is not in your `PATH`. Run `npm list -g @ifalabs/mcp-server` to confirm installation, then check your `PATH` configuration.
+
+**Server appears in client but tools return errors** Confirm the `--network` argument matches a supported network. Check `--log-level info` output for RPC connection errors.
+
+**Prices return stale or unexpected values on testnet** Testnet oracle state is independent of mainnet. Prices on Base Sepolia reflect testnet relayer activity and may be less fresh than mainnet feeds during low-activity periods.
+
+**Client doesn't recognise the server after config change** Most MCP clients require a full restart — not just a settings save — to pick up configuration changes. Fully quit and relaunch your client.
+
+**Rate limit errors on the default RPC** Switch to a dedicated RPC provider using `--rpc-url`. See the [Configuration Options](#configuration-options) table above.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Available Tools" icon="wrench" href="/integration-guides/mcp-server/available-tools">
+    Full reference for every tool the IFÁ Labs MCP Server exposes.
+  </Card>
+
+  <Card title="Example Queries" icon="message" href="/integration-guides/mcp-server/example-queries">
+    Practical prompts and workflows for using IFÁ Labs via MCP clients.
+  </Card>
+</CardGroup>

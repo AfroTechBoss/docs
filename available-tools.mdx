@@ -1,0 +1,410 @@
+---
+title: "Available Tools"
+description: "Complete reference for every tool exposed by the IFÁ Labs MCP Server — inputs, outputs, and usage notes."
+---
+
+The IFÁ Labs MCP Server exposes seven tools covering every aspect of the oracle infrastructure — from live price reads to asset discovery to network configuration. This page is the complete reference for all of them.
+
+---
+
+## Tool Overview
+
+| Tool | Description |
+| --- | --- |
+| [`get_asset_price`](#get_asset_price) | Fetch the current on-chain price for a single asset |
+| [`get_multiple_prices`](#get_multiple_prices) | Fetch prices for multiple assets in a single call |
+| [`get_derived_pair`](#get_derived_pair) | Get a cross-asset price between two supported feeds |
+| [`get_supported_assets`](#get_supported_assets) | List all currently supported assets and their IDs |
+| [`get_asset_id`](#get_asset_id) | Resolve a symbol string to its `bytes32` asset ID |
+| [`check_price_freshness`](#check_price_freshness) | Check the age and freshness status of a price feed |
+| [`get_network_info`](#get_network_info) | Return contract addresses and RPC details for all supported networks |
+
+---
+
+## `get_asset_price`
+
+Fetches the current on-chain price for a single supported asset directly from the deployed oracle contract.
+
+### Inputs
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `asset` | `string` | Yes | Asset symbol in `"SYMBOL/USD"` format — e.g. `"USDT/USD"`, `"CNGN/USD"` |
+| `network` | `string` | No | Target network. Defaults to `base-mainnet`. Options: `base-mainnet`, `base-sepolia`, `assetchain-testnet` |
+
+### Output
+
+```json
+{
+  "asset": "USDT/USD",
+  "asset_id": "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d",
+  "price": "1.000124",
+  "raw_price": "1000124000000000000",
+  "decimal": -18,
+  "last_updated": "2025-07-31T14:22:11Z",
+  "age_seconds": 412,
+  "network": "base-mainnet",
+  "contract_address": "0xA9F17344689C2c2328F94464998db1d3e35B80dC"
+}
+```
+
+### Usage Notes
+
+- `price` is the human-readable value after decimal scaling. Use this for display and LLM responses.
+- `raw_price` is the unscaled `int256` value from the contract. Use this when passing the value to Solidity logic.
+- `age_seconds` is computed at the time of the tool call. It reflects how long ago the oracle was last updated, not how long ago you queried it.
+- If the asset is not supported, the tool returns an error with `"error": "asset_not_supported"`.
+
+### Example Prompt
+
+> "What is the current USDT/USD price on Base Mainnet?"
+
+---
+
+## `get_multiple_prices`
+
+Fetches current on-chain prices for multiple assets in a single RPC call. More efficient than calling `get_asset_price` repeatedly when you need several feeds at once.
+
+### Inputs
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `assets` | `string[]` | Yes | Array of asset symbols in `"SYMBOL/USD"` format |
+| `network` | `string` | No | Target network. Defaults to `base-mainnet` |
+
+### Output
+
+```json
+{
+  "network": "base-mainnet",
+  "prices": [
+    {
+      "asset": "USDT/USD",
+      "asset_id": "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d",
+      "price": "1.000124",
+      "raw_price": "1000124000000000000",
+      "decimal": -18,
+      "last_updated": "2025-07-31T14:22:11Z",
+      "age_seconds": 412,
+      "exists": true
+    },
+    {
+      "asset": "CNGN/USD",
+      "asset_id": "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a",
+      "price": "0.000613",
+      "raw_price": "613000000000000",
+      "decimal": -18,
+      "last_updated": "2025-07-31T14:18:44Z",
+      "age_seconds": 1659,
+      "exists": true
+    },
+    {
+      "asset": "ZARP/USD",
+      "asset_id": "0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8",
+      "price": "0.054821",
+      "raw_price": "54821000000000000",
+      "decimal": -18,
+      "last_updated": "2025-07-31T14:20:03Z",
+      "age_seconds": 968,
+      "exists": true
+    }
+  ]
+}
+```
+
+### Usage Notes
+
+- Results are returned in the same order as the input `assets` array.
+- Each result includes an `exists` field. If `false`, that asset is not supported and its price fields will be zero.
+- Always check `exists` before using a price from a batch result.
+
+### Example Prompt
+
+> "Get the current prices for USDT, CNGN, and ZARP from IFÁ Labs."
+
+---
+
+## `get_derived_pair`
+
+Computes a cross-asset price between two supported feeds using the oracle's derived pair functions. For example: how much USDT is one CNGN worth, or how much CNGN is one USDT worth.
+
+### Inputs
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `asset0` | `string` | Yes | The asset being priced — e.g. `"CNGN/USD"` |
+| `asset1` | `string` | Yes | The denominator asset — e.g. `"USDT/USD"` |
+| `direction` | `string` | No | `"forward"` (asset0 in asset1 terms) or `"backward"` (asset1 in asset0 terms). Defaults to `"forward"` |
+| `network` | `string` | No | Target network. Defaults to `base-mainnet` |
+
+### Output
+
+```json
+{
+  "asset0": "CNGN/USD",
+  "asset1": "USDT/USD",
+  "direction": "forward",
+  "derived_price": "0.000613",
+  "raw_derived_price": "613000000000000",
+  "decimal": -18,
+  "network": "base-mainnet",
+  "interpretation": "1 CNGN = 0.000613 USDT"
+}
+```
+
+### Usage Notes
+
+- `"forward"` direction means: how much of `asset1` is one unit of `asset0` worth?
+- `"backward"` direction means: how much of `asset0` is one unit of `asset1` worth?
+- The `interpretation` field is a plain-language summary of the derived price — useful for LLM responses and user-facing output.
+- Both underlying USD feeds must be fresh for the derived pair to return a valid result. If either feed is stale, the tool returns a staleness error.
+
+### Example Prompts
+
+> "How much USDT is one CNGN worth right now?"
+
+> "What is the ZARP to USDC exchange rate according to IFÁ Labs?"
+
+---
+
+## `get_supported_assets`
+
+Returns the complete list of all currently supported assets, including their symbol strings, `bytes32` asset IDs, categories, and available networks.
+
+### Inputs
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `network` | `string` | No | Filter by network. Returns assets available on that network. Defaults to all networks. |
+
+### Output
+
+```json
+{
+  "total": 6,
+  "assets": [
+    {
+      "asset": "USDT/USD",
+      "symbol": "USDT",
+      "category": "global",
+      "asset_id": "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d",
+      "networks": ["base-mainnet", "base-sepolia", "assetchain-testnet"]
+    },
+    {
+      "asset": "USDC/USD",
+      "symbol": "USDC",
+      "category": "global",
+      "asset_id": "0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d",
+      "networks": ["base-mainnet", "base-sepolia", "assetchain-testnet"]
+    },
+    {
+      "asset": "CNGN/USD",
+      "symbol": "CNGN",
+      "category": "emerging-market",
+      "asset_id": "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a",
+      "networks": ["base-mainnet", "base-sepolia", "assetchain-testnet"]
+    },
+    {
+      "asset": "ZARP/USD",
+      "symbol": "ZARP",
+      "category": "emerging-market",
+      "asset_id": "0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8",
+      "networks": ["base-mainnet", "base-sepolia", "assetchain-testnet"]
+    },
+    {
+      "asset": "BRZ/USD",
+      "symbol": "BRZ",
+      "category": "emerging-market",
+      "asset_id": "0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5",
+      "networks": ["base-mainnet", "base-sepolia", "assetchain-testnet"]
+    },
+    {
+      "asset": "ETH/USD",
+      "symbol": "ETH",
+      "category": "reference",
+      "asset_id": "0x8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0",
+      "networks": ["base-mainnet", "base-sepolia", "assetchain-testnet"]
+    }
+  ]
+}
+```
+
+### Usage Notes
+
+- The `category` field distinguishes global stablecoins, emerging-market stablecoins, and reference assets like ETH.
+- This tool does not make an RPC call — asset metadata is resolved locally from the server's configuration. It is the fastest tool call available.
+- Use this tool at the start of any workflow that needs to discover or validate which assets are available before querying prices.
+
+### Example Prompt
+
+> "Which stablecoins does IFÁ Labs currently support?"
+
+---
+
+## `get_asset_id`
+
+Resolves an asset symbol string to its `bytes32` asset ID. Useful for developers who need to verify an ID before hardcoding it in a contract, or for AI workflows that need to translate a human-readable symbol into an on-chain identifier.
+
+### Inputs
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `symbol` | `string` | Yes | Asset symbol string — e.g. `"USDT/USD"` or `"CNGN/USD"` |
+
+### Output
+
+```json
+{
+  "symbol": "CNGN/USD",
+  "asset_id": "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a",
+  "generation_method": "keccak256(abi.encodePacked(\"CNGN/USD\"))",
+  "verified": true
+}
+```
+
+### Usage Notes
+
+- The `generation_method` field shows exactly how the asset ID was derived — allowing independent verification.
+- `verified: true` confirms the asset ID exists as an active feed in the deployed contract. `verified: false` means the ID was generated correctly but no feed exists for it yet.
+- Symbol strings are case-sensitive. `"usdt/usd"` and `"USDT-USD"` will not match. Always use uppercase with a forward slash: `"USDT/USD"`.
+
+### Example Prompt
+
+> "What is the IFÁ Labs asset ID for ZARP/USD?"
+
+---
+
+## `check_price_freshness`
+
+Checks the age of a price feed and evaluates whether it meets a given staleness threshold. Returns the raw age, a freshness verdict, and the time remaining before the feed would be considered stale.
+
+### Inputs
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `asset` | `string` | Yes | Asset symbol in `"SYMBOL/USD"` format |
+| `max_age_seconds` | `integer` | No | Maximum acceptable age in seconds. Defaults to `3600` (1 hour) |
+| `network` | `string` | No | Target network. Defaults to `base-mainnet` |
+
+### Output
+
+```json
+{
+  "asset": "CNGN/USD",
+  "last_updated": "2025-07-31T14:18:44Z",
+  "age_seconds": 1659,
+  "max_age_seconds": 3600,
+  "is_fresh": true,
+  "time_until_stale_seconds": 1941,
+  "time_until_stale_human": "32 minutes",
+  "network": "base-mainnet"
+}
+```
+
+### Usage Notes
+
+- `is_fresh` is the primary signal. `true` means the feed is within the specified `max_age_seconds` threshold.
+- `time_until_stale_seconds` is only present when `is_fresh` is `true`. It tells you how long until the feed would breach your threshold at the current update time — useful for scheduling proactive checks.
+- Use this tool before executing any critical workflow that depends on a fresh price — a deployment, a settlement, a liquidation simulation.
+
+### Example Prompts
+
+> "Is the CNGN/USD price feed fresh enough to use for a liquidation check?"
+
+> "How long until the USDT/USD feed goes stale based on a 30-minute threshold?"
+
+---
+
+## `get_network_info`
+
+Returns contract addresses, RPC endpoints, chain IDs, and block explorer links for all networks supported by IFÁ Labs.
+
+### Inputs
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `network` | `string` | No | Filter to a specific network. Returns all networks if omitted. |
+
+### Output
+
+```json
+{
+  "networks": [
+    {
+      "name": "base-mainnet",
+      "chain_id": 8453,
+      "rpc_url": "https://mainnet.base.org",
+      "oracle_address": "0xA9F17344689C2c2328F94464998db1d3e35B80dC",
+      "explorer": "https://basescan.org",
+      "explorer_contract_url": "https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC",
+      "status": "live"
+    },
+    {
+      "name": "base-sepolia",
+      "chain_id": 84532,
+      "rpc_url": "https://sepolia.base.org",
+      "oracle_address": "0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b",
+      "explorer": "https://sepolia.basescan.org",
+      "explorer_contract_url": "https://sepolia.basescan.org/address/0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b",
+      "status": "testnet"
+    },
+    {
+      "name": "assetchain-testnet",
+      "chain_id": 42421,
+      "rpc_url": "https://enugu-rpc.assetchain.org",
+      "oracle_address": "0xBAc31e568883774A632275F9c8E7A5Bd117000F7",
+      "explorer": "https://scan-testnet.assetchain.org",
+      "explorer_contract_url": "https://scan-testnet.assetchain.org/address/0xBAc31e568883774A632275F9c8E7A5Bd117000F7",
+      "status": "testnet"
+    }
+  ]
+}
+```
+
+### Usage Notes
+
+- Use this tool when building automated workflows that need to programmatically resolve contract addresses or RPC endpoints rather than hardcoding them.
+- The `status` field distinguishes production deployments from testnets.
+- RPC URLs returned are the public defaults. For production workflows, override with a dedicated provider using the `--rpc-url` server argument.
+
+### Example Prompt
+
+> "What is the IFÁ Labs oracle contract address on Base Mainnet?"
+
+---
+
+## Error Reference
+
+All tools return a consistent error format when something goes wrong:
+
+```json
+{
+  "error": "error_code",
+  "message": "Human-readable description of what went wrong.",
+  "asset": "CNGN/USD",
+  "network": "base-mainnet"
+}
+```
+
+| Error Code | Cause | Resolution |
+| --- | --- | --- |
+| `asset_not_supported` | The requested asset has no feed on the target network | Check `get_supported_assets` for the full list of available feeds |
+| `price_feed_stale` | The feed exists but exceeds the staleness threshold | Widen `max_age_seconds` or check if a relayer issue is affecting the feed |
+| `network_not_supported` | The `network` parameter value is not recognised | Use one of: `base-mainnet`, `base-sepolia`, `assetchain-testnet` |
+| `rpc_connection_failed` | The server could not connect to the configured RPC endpoint | Check your `--rpc-url` configuration or switch to a dedicated RPC provider |
+| `invalid_symbol_format` | The symbol string is malformed | Use uppercase with forward slash: `"USDT/USD"` not `"usdt-usd"` |
+| `derived_pair_failed` | One or both underlying feeds are unavailable or stale | Check freshness of both feeds individually before retrying |
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Example Queries" icon="message" href="/integration-guides/mcp-server/example-queries">
+    Practical prompts and real workflows for every MCP client.
+  </Card>
+
+  <Card title="MCP Client Compatibility" icon="plug" href="/integration-guides/mcp-server/mcp-client-compatibility">
+    Detailed compatibility notes for every supported MCP client.
+  </Card>
+</CardGroup>

@@ -1,0 +1,460 @@
+---
+title: "Running Price Monitoring"
+description: "Production-ready monitoring scripts and alerting patterns for IFÁ Labs price feeds — detect staleness, deviation, and feed anomalies before they affect your protocol."
+---
+
+On-chain checks protect your contracts at execution time. Off-chain monitoring protects your protocol between executions — alerting your team before a stale feed, a depeg event, or a relayer delay reaches the point where it causes a transaction to revert or a user to be harmed.
+
+This page provides production-ready monitoring scripts, alerting patterns, and operational guidance for running IFÁ Labs feed monitoring in a live environment.
+
+---
+
+## What to Monitor
+
+Before writing any monitoring code, define what conditions matter for your protocol:
+
+| Condition | Why It Matters | Recommended Alert Threshold |
+| --- | --- | --- |
+| Feed staleness | Stale data may no longer reflect market reality | Age \> heartbeat interval × 1.2 |
+| Peg deviation | Off-peg stablecoin may indicate depeg event | \> 0.5% from \$1.00 for global stablecoins |
+| Sudden price movement | Rapid movement may indicate manipulation or genuine crisis | \> 1% change between consecutive updates |
+| Update frequency drop | Fewer updates than expected may indicate relayer issues | \< expected updates per hour |
+| Cross-chain divergence | Price inconsistency across chains may indicate deployment issues | \> 0.1% deviation between networks |
+| Feed going offline | Asset returning `exists = false` | Immediate — should never happen post-launch |
+
+---
+
+## Basic Monitoring Script
+
+A minimal polling monitor that checks all feeds every five minutes and logs anomalies:
+
+```javascript
+const { ethers } = require("ethers");
+
+// ─── Configuration ────────────────────────────────────────────────────────────
+
+const ORACLE_ADDRESS = "0xA9F17344689C2c2328F94464998db1d3e35B80dC";
+const RPC_URL        = "https://mainnet.base.org";
+const POLL_INTERVAL  = 300_000; // 5 minutes in milliseconds
+
+const ASSETS = {
+  "USDT/USD": {
+    id:           "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d",
+    maxAge:       5400,   // 90 minutes — 1.5× the 1hr heartbeat
+    maxDeviation: 0.005,  // 0.5% from peg
+    expectedPeg:  1.0,
+  },
+  "USDC/USD": {
+    id:           "0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d",
+    maxAge:       5400,
+    maxDeviation: 0.005,
+    expectedPeg:  1.0,
+  },
+  "CNGN/USD": {
+    id:           "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a",
+    maxAge:       10800,  // 3 hours — 1.5× the 2hr heartbeat
+    maxDeviation: 0.015,  // 1.5% — wider for emerging market asset
+    expectedPeg:  null,   // No fixed peg check for CNGN
+  },
+  "ZARP/USD": {
+    id:           "0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8",
+    maxAge:       10800,
+    maxDeviation: 0.015,
+    expectedPeg:  null,
+  },
+  "BRZ/USD": {
+    id:           "0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5",
+    maxAge:       10800,
+    maxDeviation: 0.015,
+    expectedPeg:  null,
+  },
+  "ETH/USD": {
+    id:           "0x8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0",
+    maxAge:       5400,
+    maxDeviation: null,   // No peg check for ETH
+    expectedPeg:  null,
+  },
+};
+
+// ─── Oracle Setup ─────────────────────────────────────────────────────────────
+
+const provider = new ethers.JsonRpcProvider(RPC_URL);
+const oracle   = new ethers.Contract(ORACLE_ADDRESS, [
+  "function getAssetsInfo(bytes32[]) view returns ((int256 price, int8 decimal, uint256 lastUpdateTime)[], bool[])"
+], provider);
+
+// ─── Price State ──────────────────────────────────────────────────────────────
+
+const previousPrices = {};
+
+// ─── Alert Handler ────────────────────────────────────────────────────────────
+
+function alert(level, symbol, message, data = {}) {
+  const timestamp = new Date().toISOString();
+  const entry     = { timestamp, level, symbol, message, ...data };
+
+  const prefix = level === "CRITICAL" ? "🔴" :
+                 level === "WARNING"  ? "🟡" : "🟢";
+
+  console.log(`${prefix} [${timestamp}] [${level}] ${symbol}: ${message}`);
+  if (Object.keys(data).length > 0) {
+    console.log("   Data:", JSON.stringify(data, null, 2));
+  }
+
+  // Replace this with your alerting integration:
+  // - PagerDuty: sendPagerDutyAlert(entry)
+  // - Discord:   sendDiscordWebhook(entry)
+  // - Telegram:  sendTelegramMessage(entry)
+  // - Slack:     sendSlackWebhook(entry)
+}
+
+// ─── Core Check Logic ─────────────────────────────────────────────────────────
+
+async function checkFeeds() {
+  const symbols  = Object.keys(ASSETS);
+  const assetIds = symbols.map(s => ASSETS[s].id);
+  const now      = Math.floor(Date.now() / 1000);
+
+  let infos, exists;
+
+  try {
+    [infos, exists] = await oracle.getAssetsInfo(assetIds);
+  } catch (err) {
+    alert("CRITICAL", "ALL_FEEDS", "RPC call failed — oracle unreachable", {
+      error: err.message,
+    });
+    return;
+  }
+
+  for (let i = 0; i < symbols.length; i++) {
+    const symbol  = symbols[i];
+    const config  = ASSETS[symbol];
+    const info    = infos[i];
+    const present = exists[i];
+
+    // ── Feed existence ───────────────────────────────────────────────────────
+    if (!present) {
+      alert("CRITICAL", symbol, "Feed returned exists = false");
+      continue;
+    }
+
+    const price     = Number(info.price) / 10 ** -Number(info.decimal);
+    const ageSeconds = now - Number(info.lastUpdateTime);
+
+    // ── Staleness ────────────────────────────────────────────────────────────
+    if (ageSeconds > config.maxAge) {
+      alert("CRITICAL", symbol, "Feed is stale", {
+        ageSeconds,
+        maxAge:     config.maxAge,
+        exceededBy: ageSeconds - config.maxAge,
+        lastUpdate: new Date(Number(info.lastUpdateTime) * 1000).toISOString(),
+      });
+    } else if (ageSeconds > config.maxAge * 0.8) {
+      alert("WARNING", symbol, "Feed approaching staleness threshold", {
+        ageSeconds,
+        maxAge:        config.maxAge,
+        percentUsed:   `${((ageSeconds / config.maxAge) * 100).toFixed(1)}%`,
+      });
+    }
+
+    // ── Peg deviation ────────────────────────────────────────────────────────
+    if (config.expectedPeg !== null) {
+      const deviation = Math.abs(price - config.expectedPeg) / config.expectedPeg;
+
+      if (deviation > config.maxDeviation) {
+        alert("CRITICAL", symbol, "Price deviation exceeds threshold", {
+          currentPrice:  price,
+          expectedPeg:   config.expectedPeg,
+          deviation:     `${(deviation * 100).toFixed(4)}%`,
+          maxDeviation:  `${(config.maxDeviation * 100).toFixed(2)}%`,
+        });
+      }
+    }
+
+    // ── Sudden price movement ─────────────────────────────────────────────────
+    const previous = previousPrices[symbol];
+    if (previous !== undefined) {
+      const movement = Math.abs(price - previous) / previous;
+
+      if (movement > 0.01) {
+        alert("WARNING", symbol, "Sudden price movement detected", {
+          previousPrice: previous,
+          currentPrice:  price,
+          movement:      `${(movement * 100).toFixed(4)}%`,
+        });
+      }
+    }
+
+    previousPrices[symbol] = price;
+
+    // ── Healthy feed log ──────────────────────────────────────────────────────
+    alert("INFO", symbol, `$${price.toFixed(6)} — ${ageSeconds}s old`);
+  }
+}
+
+// ─── Run ──────────────────────────────────────────────────────────────────────
+
+console.log("IFÁ Labs Feed Monitor starting...");
+console.log(`Polling interval: ${POLL_INTERVAL / 1000}s`);
+console.log(`Oracle: ${ORACLE_ADDRESS}\n`);
+
+checkFeeds();
+setInterval(checkFeeds, POLL_INTERVAL);
+```
+
+---
+
+## Adding Alerting Integrations
+
+The monitor above calls an `alert()` function for every anomaly. Replace the placeholder comment with your alerting stack.
+
+### Discord Webhook
+
+```javascript
+async function sendDiscordAlert(level, symbol, message, data) {
+  const color = level === "CRITICAL" ? 0xFF0000 :
+                level === "WARNING"  ? 0xFFAA00 : 0x00FF00;
+
+  const embed = {
+    title:       `[${level}] ${symbol}`,
+    description: message,
+    color,
+    timestamp:   new Date().toISOString(),
+    fields:      Object.entries(data).map(([key, value]) => ({
+      name:   key,
+      value:  String(value),
+      inline: true,
+    })),
+    footer: { text: "IFÁ Labs Feed Monitor" },
+  };
+
+  await fetch(process.env.DISCORD_WEBHOOK_URL, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ embeds: [embed] }),
+  });
+}
+```
+
+### Telegram Bot
+
+```javascript
+async function sendTelegramAlert(level, symbol, message, data) {
+  const emoji = level === "CRITICAL" ? "🔴" :
+                level === "WARNING"  ? "🟡" : "🟢";
+
+  const lines = [
+    `${emoji} *[${level}] ${symbol}*`,
+    `${message}`,
+    "",
+    ...Object.entries(data).map(([k, v]) => `• *${k}:* \`${v}\``),
+  ];
+
+  await fetch(
+    `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
+    {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({
+        chat_id:    process.env.TELEGRAM_CHAT_ID,
+        text:       lines.join("\n"),
+        parse_mode: "Markdown",
+      }),
+    }
+  );
+}
+```
+
+### PagerDuty
+
+```javascript
+async function sendPagerDutyAlert(level, symbol, message, data) {
+  if (level !== "CRITICAL") return; // Only page on critical
+
+  await fetch("https://events.pagerduty.com/v2/enqueue", {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({
+      routing_key:  process.env.PAGERDUTY_ROUTING_KEY,
+      event_action: "trigger",
+      payload: {
+        summary:   `IFÁ Labs [${symbol}]: ${message}`,
+        severity:  "critical",
+        source:    "ifa-labs-monitor",
+        custom_details: data,
+      },
+    }),
+  });
+}
+```
+
+---
+
+## Real-Time Event-Based Monitor
+
+Polling every five minutes misses events between checks. For tighter monitoring, combine polling with real-time event listening:
+
+```javascript
+const { ethers } = require("ethers");
+
+const WSS_URL        = "wss://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY";
+const ORACLE_ADDRESS = "0xA9F17344689C2c2328F94464998db1d3e35B80dC";
+
+const provider = new ethers.WebSocketProvider(WSS_URL);
+const oracle   = new ethers.Contract(ORACLE_ADDRESS, [
+  "event PriceUpdated(bytes32 indexed assetId, int256 price, int8 decimal, uint64 timestamp)"
+], provider);
+
+const ASSET_SYMBOLS = {
+  "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d": "USDT/USD",
+  "0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d": "USDC/USD",
+  "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a": "CNGN/USD",
+  "0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8": "ZARP/USD",
+  "0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5": "BRZ/USD",
+  "0x8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0": "ETH/USD",
+};
+
+// Track last update time per asset for gap detection
+const lastUpdateTimes = {};
+
+oracle.on("PriceUpdated", (assetId, price, decimal, timestamp) => {
+  const symbol       = ASSET_SYMBOLS[assetId] ?? `Unknown`;
+  const humanPrice   = Number(price) / 10 ** -Number(decimal);
+  const ts           = Number(timestamp);
+  const previousTime = lastUpdateTimes[assetId];
+
+  if (previousTime) {
+    const gap = ts - previousTime;
+    if (gap > 7200) { // 2 hours — adjust per asset
+      console.log(`⚠️  [GAP DETECTED] ${symbol}: ${gap}s since last update`);
+    }
+  }
+
+  lastUpdateTimes[assetId] = ts;
+  console.log(`✓ [UPDATE] ${symbol}: $${humanPrice.toFixed(6)} at ${new Date(ts * 1000).toISOString()}`);
+});
+
+// WebSocket reconnection logic
+provider.on("error", (err) => {
+  console.error("WebSocket error:", err.message);
+  // Implement reconnection here — see note below
+});
+
+console.log("Real-time event monitor running...");
+```
+
+<Warning>
+  WebSocket connections to RPC providers drop periodically. Production monitors must implement reconnection logic. Without it, your monitor will silently stop receiving events after the first disconnection. Libraries like `reconnecting-websocket` handle this automatically, or implement exponential backoff reconnection manually.
+</Warning>
+
+---
+
+## Grafana Dashboard
+
+For teams that want a visual monitoring dashboard, expose metrics from the monitor and scrape with Prometheus:
+
+```javascript
+const { ethers }  = require("ethers");
+const http        = require("http");
+const { Registry, Gauge } = require("prom-client");
+
+const registry = new Registry();
+
+// Define metrics
+const priceGauge = new Gauge({
+  name:       "ifa_labs_price",
+  help:       "Current on-chain price from IFÁ Labs oracle",
+  labelNames: ["asset", "network"],
+  registers:  [registry],
+});
+
+const ageGauge = new Gauge({
+  name:       "ifa_labs_feed_age_seconds",
+  help:       "Age of the IFÁ Labs price feed in seconds",
+  labelNames: ["asset", "network"],
+  registers:  [registry],
+});
+
+const freshnessGauge = new Gauge({
+  name:       "ifa_labs_feed_fresh",
+  help:       "1 if feed is fresh (within threshold), 0 if stale",
+  labelNames: ["asset", "network"],
+  registers:  [registry],
+});
+
+// Update metrics
+async function updateMetrics() {
+  // ... fetch prices and update gauges
+  // priceGauge.set({ asset: "USDT/USD", network: "base-mainnet" }, price);
+  // ageGauge.set({ asset: "USDT/USD", network: "base-mainnet" }, ageSeconds);
+  // freshnessGauge.set({ asset: "USDT/USD", network: "base-mainnet" }, isFresh ? 1 : 0);
+}
+
+// Expose /metrics endpoint for Prometheus scraping
+http.createServer(async (req, res) => {
+  if (req.url === "/metrics") {
+    res.setHeader("Content-Type", registry.contentType);
+    res.end(await registry.metrics());
+  }
+}).listen(9090);
+
+setInterval(updateMetrics, 60_000);
+updateMetrics();
+
+console.log("Prometheus metrics available at :9090/metrics");
+```
+
+Import the `ifa_labs_*` metrics into Grafana and build dashboards showing price history, feed age, and staleness status across all assets and networks.
+
+---
+
+## Deployment Options
+
+| Option | Best For | Notes |
+| --- | --- | --- |
+| **Local process** | Development and testing | Not suitable for production — no reliability guarantees |
+| **Docker container** | Self-hosted production | Use a process manager like PM2 or systemd for restart on failure |
+| **Cloud function (Lambda, Cloud Run)** | Scheduled polling | Trigger every 5 minutes via cron. No persistent state — use a database for `previousPrices`. |
+| **Dedicated VPS** | Full monitoring stack | Run monitor \+ Prometheus \+ Grafana together |
+| **Tenderly Alerts** | No-code monitoring | Set up web3 action alerts directly on the oracle contract without writing code |
+
+---
+
+## Monitoring Checklist
+
+Before going live with a protocol that consumes IFÁ Labs feeds, confirm:
+
+<Steps>
+  <Step title="Monitoring is running in production">
+    The monitoring script is deployed and running against Base Mainnet — not just tested locally against testnet.
+  </Step>
+  <Step title="Alerting is wired up">
+    At least one alerting integration — Discord, Telegram, PagerDuty, or equivalent — is configured and has been tested end-to-end with a simulated alert.
+  </Step>
+  <Step title="Thresholds are calibrated to heartbeat intervals">
+    `maxAge` values in the monitoring config are set to at least 1.5× the heartbeat interval for each asset — not arbitrary round numbers.
+  </Step>
+  <Step title="WebSocket reconnection is implemented">
+    If using real-time event monitoring, reconnection logic is in place and has been tested by deliberately killing the WebSocket connection.
+  </Step>
+  <Step title="Runbook exists for alerts">
+    Every alert type has a documented response procedure — who gets paged, what they check first, what actions are available (pause, fallback, investigate).
+  </Step>
+  <Step title="On-call rotation is defined">
+    Someone is responsible for responding to CRITICAL alerts at any time. Monitoring without on-call coverage is monitoring theater.
+  </Step>
+</Steps>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Building Fallback Strategies" icon="shield" href="/advanced-topics/building-fallback-strategies">
+    What to do when monitoring detects a problem — fallback oracle patterns for protocol resilience.
+  </Card>
+
+  <Card title="Handle Stale Data" icon="clock" href="/integration-guides/evm-smart-contracts/handle-stale-data">
+    On-chain staleness patterns that complement off-chain monitoring.
+  </Card>
+</CardGroup>

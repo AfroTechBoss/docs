@@ -1,0 +1,275 @@
+---
+title: "Handle Stale Data"
+description: "Understand why stale prices occur, how to detect them, and how to build protocols that degrade gracefully when oracle data is delayed."
+---
+
+Stale price data is one of the most common — and most underestimated — risks in oracle-dependent protocols. A price feed that hasn't updated recently may no longer reflect market reality. For stablecoins, even a small undetected depeg can trigger cascading liquidations, enable arbitrage at protocol expense, or silently under-collateralize positions.
+
+This page covers why staleness happens, how to detect it reliably, and how to build protocols that respond correctly when it occurs.
+
+---
+
+## Why Staleness Happens
+
+IFÁ Labs uses a hybrid deviation \+ time trigger model. A price update is pushed on-chain when either:
+
+- The aggregated price deviates beyond the configured threshold from the last on-chain value, **or**
+- A maximum time interval has elapsed since the last update
+
+This means during periods of market stability — when a stablecoin is sitting tightly at its peg — updates are intentionally infrequent. The oracle is working correctly; it simply has nothing meaningful to report.
+
+**Staleness is a problem in two scenarios:**
+
+1. **Your staleness threshold is too tight** for the asset's natural update cadence. You're rejecting valid, accurate prices because your protocol expects more frequent updates than the oracle provides.
+2. **A genuine delay has occurred** — a relayer issue, source outage, or network congestion has prevented a timely update. The price may be stale and potentially inaccurate.
+
+Handling both scenarios correctly requires different responses.
+
+---
+
+## Detecting Staleness
+
+The `lastUpdateTime` field returned by `getAssetInfo` is your signal. Compare it against `block.timestamp` to determine price age.
+
+```solidity
+function _isFresh(uint256 lastUpdateTime, uint256 maxAge)
+    internal
+    view
+    returns (bool)
+{
+    return block.timestamp - lastUpdateTime <= maxAge;
+}
+```
+
+Always use `block.timestamp` for this comparison — never an off-chain timestamp passed as a parameter, which can be manipulated.
+
+---
+
+## Staleness Check Patterns
+
+### Pattern 1: Hard Revert
+
+The simplest and safest approach. If the price is stale, revert. The transaction fails cleanly and no logic executes against potentially outdated data.
+
+```solidity
+uint256 public constant MAX_PRICE_AGE = 3600; // 1 hour
+
+function _getFreshPrice(bytes32 assetId)
+    internal
+    view
+    returns (int256 price, int8 decimal)
+{
+    (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+        ORACLE.getAssetInfo(assetId);
+
+    require(exists, "IFA: asset not supported");
+    require(
+        block.timestamp - info.lastUpdateTime <= MAX_PRICE_AGE,
+        "IFA: price feed is stale"
+    );
+
+    return (info.price, info.decimal);
+}
+```
+
+**Best for:** Lending protocols, liquidation engines, minting functions — any high-stakes operation where proceeding with stale data is worse than failing.
+
+---
+
+### Pattern 2: Fallback to Secondary Oracle
+
+If the primary feed is stale, attempt a secondary oracle before reverting. This maximises uptime without compromising safety.
+
+```solidity
+function _getPriceWithFallback(bytes32 assetId)
+    internal
+    view
+    returns (int256 price, int8 decimal)
+{
+    (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+        ORACLE.getAssetInfo(assetId);
+
+    if (exists && block.timestamp - info.lastUpdateTime <= MAX_PRICE_AGE) {
+        return (info.price, info.decimal);
+    }
+
+    // Primary stale or missing — attempt fallback
+    (int256 fallbackPrice, bool fallbackFresh) = _getSecondaryOraclePrice(assetId);
+    require(fallbackFresh, "IFA: all price sources stale");
+
+    return (fallbackPrice, -18);
+}
+```
+
+**Best for:** Protocols that need high availability and have a secondary oracle integration available. See [Building Fallback Strategies](/advanced-topics/building-fallback-strategies) for a complete implementation.
+
+---
+
+### Pattern 3: Protocol Pause on Staleness
+
+For critical protocols, stale data should trigger an automatic pause on sensitive operations — borrowing, liquidations, minting — while allowing safe operations like withdrawals to continue.
+
+```solidity
+bool public paused;
+address public guardian;
+
+modifier whenPriceFresh(bytes32 assetId) {
+    (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+        ORACLE.getAssetInfo(assetId);
+
+    if (!exists || block.timestamp - info.lastUpdateTime > MAX_PRICE_AGE) {
+        paused = true;
+        emit ProtocolPaused(assetId, block.timestamp);
+        revert("IFA: price stale — protocol paused");
+    }
+    _;
+}
+
+function borrow(bytes32 collateralAssetId, uint256 amount)
+    external
+    whenPriceFresh(collateralAssetId)
+{
+    // Borrow logic — only executes with a fresh price
+}
+```
+
+**Best for:** Lending and borrowing protocols where a stale price during liquidation could cause significant user harm.
+
+---
+
+### Pattern 4: Cached Price with Extended Tolerance
+
+For lower-stakes operations — dashboards, analytics views, non-critical displays — cache the last known good price and serve it with a wider tolerance window.
+
+```solidity
+struct CachedPrice {
+    int256   price;
+    int8     decimal;
+    uint256  cachedAt;
+}
+
+mapping(bytes32 => CachedPrice) public priceCache;
+
+uint256 public constant LIVE_MAX_AGE   = 3600;   // 1 hour — for critical paths
+uint256 public constant CACHE_MAX_AGE  = 86400;  // 24 hours — for non-critical reads
+
+function updateCache(bytes32 assetId) external {
+    (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+        ORACLE.getAssetInfo(assetId);
+
+    require(exists, "IFA: asset not supported");
+    require(
+        block.timestamp - info.lastUpdateTime <= LIVE_MAX_AGE,
+        "IFA: source price too stale to cache"
+    );
+
+    priceCache[assetId] = CachedPrice({
+        price:    info.price,
+        decimal:  info.decimal,
+        cachedAt: block.timestamp
+    });
+}
+
+function getCachedPrice(bytes32 assetId)
+    external
+    view
+    returns (int256 price, int8 decimal)
+{
+    CachedPrice memory cached = priceCache[assetId];
+    require(
+        block.timestamp - cached.cachedAt <= CACHE_MAX_AGE,
+        "IFA: cached price expired"
+    );
+    return (cached.price, cached.decimal);
+}
+```
+
+<Warning>
+  Never use cached prices for liquidation logic, collateral valuation, or any operation where an inaccurate price causes direct financial harm to users. Caching is appropriate only for read-only or display contexts.
+</Warning>
+
+---
+
+## Per-Asset Staleness Thresholds
+
+Different assets have different update cadences. A single global threshold applied across all feeds will either be too tight for some assets or too loose for others. Use a mapping to manage per-asset configuration:
+
+```solidity
+mapping(bytes32 => uint256) public maxPriceAge;
+
+constructor() {
+    // Tighter for high-stakes global stablecoins
+    maxPriceAge[USDT_ASSET_ID] = 3600;   // 1 hour
+    maxPriceAge[USDC_ASSET_ID] = 3600;   // 1 hour
+
+    // Slightly wider for emerging market stablecoins
+    maxPriceAge[CNGN_ASSET_ID] = 7200;   // 2 hours
+    maxPriceAge[ZARP_ASSET_ID] = 7200;   // 2 hours
+    maxPriceAge[BRZ_ASSET_ID]  = 7200;   // 2 hours
+}
+
+function _getFreshPriceForAsset(bytes32 assetId)
+    internal
+    view
+    returns (int256 price, int8 decimal)
+{
+    (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+        ORACLE.getAssetInfo(assetId);
+
+    require(exists, "IFA: asset not supported");
+    require(
+        block.timestamp - info.lastUpdateTime <= maxPriceAge[assetId],
+        "IFA: price feed is stale"
+    );
+
+    return (info.price, info.decimal);
+}
+```
+
+---
+
+## Diagnosing Staleness in Production
+
+If your protocol is hitting staleness reverts unexpectedly, work through this checklist before adjusting thresholds:
+
+<Steps>
+  <Step title="Check the last update time on-chain">
+    Go to the contract on Basescan → **Read Contract** → `getAssetInfo` → enter the asset ID. Check `lastUpdateTime` against the current block timestamp. Calculate the actual age in seconds.
+  </Step>
+  <Step title="Check the PriceUpdated event log">
+    On Basescan → **Events** tab → filter by `PriceUpdated` and your asset ID. Look at the timestamp of the most recent event. This tells you the real update cadence for that asset.
+  </Step>
+  <Step title="Compare against your threshold">
+    If the actual update interval is consistently longer than your `MAX_PRICE_AGE`, your threshold is too tight for this asset's natural cadence. Widen it to match observed behaviour.
+  </Step>
+  <Step title="Check if all assets are affected">
+    If every feed is stale simultaneously, the issue is likely a relayer delay rather than a per-asset problem. Monitor the IFÁ Labs Telegram or X for any announced incidents.
+  </Step>
+  <Step title="Report prolonged staleness">
+    If a feed remains stale for more than 12 hours with no announcement, report it via [support@ifalabs.com](mailto:support@ifalabs.com) or the [Telegram](https://t.me/ifalabs).
+  </Step>
+</Steps>
+
+---
+
+## Best Practices Summary
+
+- **Fail closed.** Revert on stale data in critical paths. Never proceed with a potentially inaccurate price because it's convenient.
+- **Use per-asset thresholds.** A single global `MAX_PRICE_AGE` doesn't reflect the different update cadences of different assets.
+- **Start wide, tighten with data.** Deploy with a 2-hour threshold, observe real update patterns in production, and tighten from there.
+- **Never adjust thresholds under pressure.** If your protocol is hitting staleness reverts during a market event, that's the system working correctly — not a bug to patch around.
+- **Monitor off-chain.** On-chain checks protect your contracts. Off-chain monitoring alerts your team before users are affected. See [Running Price Monitoring](/advanced-topics/running-price-monitoring).
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Working with Asset IDs" icon="fingerprint" href="/integration-guides/evm-smart-contracts/working-with-asset-ids">
+    Understand how asset IDs are generated and managed.
+  </Card>
+
+  <Card title="Building Fallback Strategies" icon="shield" href="/advanced-topics/building-fallback-strategies">
+    Implement multi-oracle fallback for maximum protocol resilience.
+  </Card>
+</CardGroup>

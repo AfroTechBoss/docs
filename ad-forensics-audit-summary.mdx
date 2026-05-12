@@ -1,0 +1,183 @@
+---
+title: "AdForensics Audit Summary"
+description: "Results, findings, and resolution status from the A&D Forensics security audit of the IFÁ Labs oracle contracts."
+---
+
+All IFÁ Labs oracle smart contracts were professionally audited by A&D Forensics prior to mainnet deployment. This page summarises the audit scope, methodology, findings, and current resolution status. The full audit report is available on request.
+
+---
+
+## Audit Overview
+
+| Field | Detail |
+| --- | --- |
+| **Auditor** | A&D Forensics |
+| **Audit Completed** | July 31, 2025 |
+| **Codebase** | [github.com/IFA-Labs/oracle\_contract](https://github.com/IFA-Labs/oracle_contract) |
+| **Commit Audited** | `17f7ffc31a9818f35977ad042986cb72820d513b` |
+| **Report Delivered** | July 31, 2025 |
+| **Current Status** | All findings resolved — as of January 7, 2026 |
+
+---
+
+## Executive Summary
+
+A&D Forensics conducted a comprehensive security audit of the IFÁ Labs oracle contracts using a combination of manual code review, automated static analysis with Mythril, and functional testing including simulated exploit scenarios.
+
+**Outcome:**
+
+- No critical vulnerabilities found
+- No high-severity vulnerabilities found
+- 7 total findings: 5 low-severity, 2 informational
+- All 7 findings resolved by the IFÁ Labs team
+
+The audit confirmed that the contracts follow sound security practices for an on-chain price oracle system. The IFÁ Labs team addressed every reported issue prior to mainnet deployment.
+
+---
+
+## Findings Summary
+
+| # | Title | Severity | Status |
+| --- | --- | --- | --- |
+| 1 | Inefficient Stale Check Allows Redundant Updates | Low | Resolved |
+| 2 | Self-Pairing Allowed in Price Calculation | Low | Resolved |
+| 3 | Lack of Zero-Price Validation in Submissions | Low | Resolved |
+| 4 | Silent Reverts in Internal Functions | Low | Resolved |
+| 5 | Indexing a Struct Provides No Searchable Value | Low | Resolved |
+| 6 | Incorrect Error Reporting in Batch Pair Functions | Informational | Resolved |
+| 7 | Unnecessary Comments and Inefficient Logic | Informational | Resolved |
+
+**All 7 findings have been resolved. No open issues remain.**
+
+---
+
+## Finding Details
+
+### Finding 1 — Inefficient Stale Check Allows Redundant Updates
+
+**Severity:** Low | **Status:** Resolved
+
+The staleness check used a strict greater-than comparison (`>`) instead of greater-than-or-equal (`>=`). This allowed a price update to be submitted at exactly the staleness boundary, where the price had not actually changed — resulting in a redundant on-chain write that consumed gas without updating meaningful data.
+
+**Resolution:** The comparison operator was corrected from `>` to `>=`, preventing redundant submissions at the exact staleness boundary.
+
+---
+
+### Finding 2 — Self-Pairing Allowed in Price Calculation
+
+**Severity:** Low | **Status:** Resolved
+
+The derived pair functions did not validate that `assetIndex0` and `assetIndex1` were different assets. Passing the same asset ID for both parameters produced a derived price of exactly 1.0 — a misleading and potentially exploitable result for protocols relying on cross-asset pricing logic.
+
+**Resolution:** An explicit self-pairing check was added. Passing identical asset IDs to any derived pair function now reverts with a descriptive error.
+
+---
+
+### Finding 3 — Lack of Zero-Price Validation in Submissions
+
+**Severity:** Low | **Status:** Resolved
+
+Price submissions were not validated against a zero-price guard before being stored on-chain. A relayer submitting a zero price — whether due to a bug, a source failure, or malicious intent — would have been accepted and stored, potentially triggering division-by-zero errors in protocols consuming derived pairs.
+
+**Resolution:** A zero-price guard was added to the submission path. Any price update with a value of zero or below is now rejected before storage.
+
+---
+
+### Finding 4 — Silent Reverts in Internal Functions
+
+**Severity:** Low | **Status:** Resolved
+
+Several internal functions reverted without descriptive error messages, making it difficult for integrators to diagnose failures during testing and development. Silent reverts with no context are a developer experience problem and an indirect security risk — developers who cannot understand why a call failed are more likely to work around the failure incorrectly.
+
+**Resolution:** Descriptive error messages and custom errors were added to all affected internal functions.
+
+---
+
+### Finding 5 — Indexing a Struct Provides No Searchable Value
+
+**Severity:** Low | **Status:** Resolved
+
+An event parameter of struct type was marked as `indexed`. In Solidity, indexing a non-value type (struct, array, bytes) stores only the `keccak256` hash of the encoded value — not the value itself. This makes the indexed parameter unsearchable and misleads developers into believing they can filter events by struct contents when they cannot.
+
+**Resolution:** The `indexed` modifier was removed from the struct parameter. The event now correctly indexes only value-type parameters that can be meaningfully filtered.
+
+---
+
+### Finding 6 — Incorrect Error Reporting in Batch Pair Functions
+
+**Severity:** Informational | **Status:** Resolved
+
+Batch derived pair functions reported incorrect error details when input arrays were mismatched — the error message referenced the wrong array lengths, making it harder to identify which array was the source of the mismatch during debugging.
+
+**Resolution:** Error messages were corrected to accurately report the lengths of both input arrays in all batch function revert conditions.
+
+---
+
+### Finding 7 — Unnecessary Comments and Inefficient Logic
+
+**Severity:** Informational | **Status:** Resolved
+
+Several sections of the contract contained outdated comments that no longer matched the code, and minor logic inefficiencies that added unnecessary bytecode without contributing to contract behaviour.
+
+**Resolution:** Outdated comments were removed or updated. Inefficient logic was refactored to reduce bytecode size and improve readability.
+
+---
+
+## Audit Methodology
+
+A&D Forensics applied a three-phase methodology:
+
+**Phase 1 — Manual Code Review** Line-by-line review of all contract source code with focus on business logic correctness, access control, arithmetic safety, and oracle-specific attack vectors including flash loan manipulation, price staleness exploitation, and relayer collusion scenarios.
+
+**Phase 2 — Automated Static Analysis** Static analysis using Mythril to detect known vulnerability patterns — reentrancy, integer overflow/underflow, unchecked external calls, and delegatecall misuse.
+
+**Phase 3 — Functional Testing** Unit tests and simulated exploit scenarios targeting edge cases identified during manual review — including self-pairing attacks, zero-price submissions, and boundary conditions in staleness and deviation logic.
+
+---
+
+## Current Security Posture
+
+As of January 7, 2026, all findings from the A&D Forensics audit have been resolved. The IFÁ Labs oracle contracts are deployed on Base Mainnet with no known critical, high, or medium severity issues.
+
+**Important caveats:**
+
+Security is not a one-time event. The current audit covers the specific commit listed above. Contracts deployed from that commit are considered audited. Any future contract upgrades or new deployments will be audited before mainnet launch and documented on this page.
+
+IFÁ Labs recommends that protocols integrating the oracle implement their own risk mitigations in addition to relying on the audit:
+
+- Staleness checks on all price reads
+- Peg deviation circuit breakers for stablecoin feeds
+- Multi-oracle fallback for high-value operations
+- Off-chain monitoring for feed health
+
+No oracle infrastructure — however well audited — eliminates the need for protocol-level defensive design.
+
+---
+
+## Request the Full Audit Report
+
+The complete A&D Forensics audit report is available on request.
+
+<CardGroup cols={2}>
+  <Card title="Request via Email" icon="envelope" href="mailto:ifalabstudio@gmail.com">
+    Email [ifalabstudio@gmail.com](mailto:ifalabstudio@gmail.com) with your organisation name and intended use.
+  </Card>
+
+  <Card title="View on GitHub" icon="github" href="https://github.com/IFA-Labs/oracle_contract">
+    The audit report is also available in the official oracle contract repository.
+  </Card>
+</CardGroup>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Data Integrity Mechanisms" icon="shield" href="/security-and-audits/data-integrity-mechanisms">
+    How IFÁ Labs protects price accuracy beyond the audit — aggregation, filtering, and validation layers.
+  </Card>
+
+  <Card title="Report a Vulnerability" icon="bug" href="/security-and-audits/report-a-vulnerability">
+    Responsible disclosure policy and contact channels for reporting security issues.
+  </Card>
+</CardGroup>

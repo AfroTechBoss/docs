@@ -1,0 +1,472 @@
+---
+title: "Common Integration Errors"
+description: "The most frequent errors developers encounter when integrating IFÁ Labs price feeds — causes, diagnostics, and fixes."
+---
+
+Most integration errors fall into a small number of categories. This page covers every common failure mode — what causes it, how to diagnose it, and exactly how to fix it. Work through the relevant section before opening a support request.
+
+---
+
+## Error Index
+
+| Error | Most Likely Cause |
+| --- | --- |
+| [`exists = false`](#exists--false) | Wrong asset ID or unsupported asset |
+| [Stale price revert](#stale-price-revert) | Staleness threshold too tight or genuine feed delay |
+| [Wrong human-readable price](#wrong-human-readable-price) | Decimal scaling applied incorrectly |
+| [Out of gas](#out-of-gas) | Unoptimised batch reads or oracle reads in loops |
+| [`InvalidAssetIndexLength`](#invalidassetindexlength) | Mismatched array lengths in batch pair functions |
+| [Derived pair revert](#derived-pair-revert) | Underlying feed missing or self-pairing attempted |
+| [No events returned](#no-events-returned) | Wrong block range or incorrect asset ID filter |
+| [WebSocket disconnects](#websocket-disconnects) | Missing reconnection logic |
+| [RPC rate limiting](#rpc-rate-limiting) | Too many calls against a public RPC endpoint |
+| [Wrong price on testnet](#wrong-price-on-testnet) | Using mainnet asset ID with testnet contract or vice versa |
+
+---
+
+## `exists = false`
+
+`getAssetInfo` returned `exists = false` — the asset ID was not recognised by the oracle contract.
+
+### Diagnosis
+
+```javascript
+// Step 1: Verify the asset ID you are using
+const { ethers } = require("ethers");
+
+const PUBLISHED_IDS = {
+  "USDT/USD": "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d",
+  "USDC/USD": "0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d",
+  "CNGN/USD": "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a",
+  "ZARP/USD": "0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8",
+  "BRZ/USD":  "0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5",
+  "ETH/USD":  "0x8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0",
+};
+
+// Step 2: Independently compute and compare
+Object.entries(PUBLISHED_IDS).forEach(([symbol, publishedId]) => {
+  const computed = ethers.keccak256(ethers.toUtf8Bytes(symbol));
+  const match    = computed.toLowerCase() === publishedId.toLowerCase();
+  console.log(`${symbol}: ${match ? "✓ Match" : "✗ MISMATCH"}`);
+  if (!match) {
+    console.log(`  Published: ${publishedId}`);
+    console.log(`  Computed:  ${computed}`);
+  }
+});
+```
+
+### Common Causes and Fixes
+
+**Wrong symbol string format.** Asset IDs are generated from `"SYMBOL/USD"` — uppercase, forward slash, no spaces. Any variation produces a different hash.
+
+```solidity
+// ✅ Correct
+bytes32 id = keccak256(abi.encodePacked("USDT/USD"));
+
+// ❌ Wrong — lowercase
+bytes32 id = keccak256(abi.encodePacked("usdt/usd"));
+
+// ❌ Wrong — hyphen separator
+bytes32 id = keccak256(abi.encodePacked("USDT-USD"));
+
+// ❌ Wrong — missing /USD suffix
+bytes32 id = keccak256(abi.encodePacked("USDT"));
+```
+
+**Typo in hardcoded hex value.** A single wrong character in a `bytes32` hex string produces a completely different ID. Always verify hardcoded values against the [Supported Assets](/introduction/supported-assets) page.
+
+**Asset not yet supported.** Not every stablecoin has a feed. Check the [Supported Assets](/introduction/supported-assets) page for the current list. If the asset you need is not listed, [request it](/introduction/supported-assets#requesting-new-feeds).
+
+**Wrong contract address.** You may be pointing at the wrong network's contract. Verify the address against the [Contract Addresses](/onchain-reference/smart-contracts/contract-addresses) page.
+
+---
+
+## Stale Price Revert
+
+Your staleness check is reverting — `block.timestamp - info.lastUpdateTime > MAX_PRICE_AGE`.
+
+### Diagnosis
+
+```javascript
+const { ethers } = require("ethers");
+
+const ORACLE_ADDRESS = "0xA9F17344689C2c2328F94464998db1d3e35B80dC";
+const provider       = new ethers.JsonRpcProvider("https://mainnet.base.org");
+const oracle         = new ethers.Contract(ORACLE_ADDRESS, [
+  "function getAssetInfo(bytes32) view returns ((int256 price, int8 decimal, uint256 lastUpdateTime), bool exists)"
+], provider);
+
+async function diagnoseStaleness(assetId, symbol, yourMaxAge) {
+  const [info, exists] = await oracle.getAssetInfo(assetId);
+
+  if (!exists) {
+    console.log(`${symbol}: exists = false — check asset ID`);
+    return;
+  }
+
+  const now        = Math.floor(Date.now() / 1000);
+  const age        = now - Number(info.lastUpdateTime);
+  const lastUpdate = new Date(Number(info.lastUpdateTime) * 1000).toISOString();
+
+  console.log(`${symbol}`);
+  console.log(`  Last updated:    ${lastUpdate}`);
+  console.log(`  Age:             ${age}s (${(age / 60).toFixed(1)} minutes)`);
+  console.log(`  Your MAX_AGE:    ${yourMaxAge}s (${(yourMaxAge / 60).toFixed(1)} minutes)`);
+  console.log(`  Status:          ${age <= yourMaxAge ? "✓ Fresh" : "✗ Stale by your threshold"}`);
+
+  if (age > yourMaxAge) {
+    console.log(`\n  Recommendation: Set MAX_PRICE_AGE to at least ${Math.ceil(age * 1.5)}s`);
+  }
+}
+
+// Check the asset you're having issues with
+diagnoseStaleness(
+  "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a",
+  "CNGN/USD",
+  3600 // your current MAX_PRICE_AGE
+);
+```
+
+### Common Causes and Fixes
+
+**Threshold is tighter than the heartbeat interval.** If your `MAX_PRICE_AGE` is shorter than the asset's heartbeat interval, the price will always appear stale during calm market periods when no deviation trigger fires.
+
+| Asset | Heartbeat | Minimum Recommended MAX\_PRICE\_AGE |
+| --- | --- | --- |
+| USDT/USD | 1 hour | 90 minutes (5400s) |
+| USDC/USD | 1 hour | 90 minutes (5400s) |
+| CNGN/USD | 2 hours | 3 hours (10800s) |
+| ZARP/USD | 2 hours | 3 hours (10800s) |
+| BRZ/USD | 2 hours | 3 hours (10800s) |
+| ETH/USD | 1 hour | 90 minutes (5400s) |
+
+**Genuine feed delay.** If the actual feed age is significantly longer than the heartbeat interval across all assets, a relayer issue may be affecting the deployment. Check the [IFÁ Labs Telegram](https://t.me/ifalabs) for any incident announcements. If none exists, report it via [support@ifalabs.com](mailto:support@ifalabs.com).
+
+**Testing against testnet during low activity.** Testnet relayers are less active than mainnet. Testnet feed ages can be significantly longer during low-traffic periods. Use wider thresholds on testnet and tighten for mainnet.
+
+---
+
+## Wrong Human-Readable Price
+
+The price value you're reading looks wrong — orders of magnitude off, or not matching external sources.
+
+### Diagnosis
+
+```javascript
+async function debugPrice(assetId, symbol) {
+  const [info, exists] = await oracle.getAssetInfo(assetId);
+
+  if (!exists) {
+    console.log("Asset not found — check ID");
+    return;
+  }
+
+  console.log(`${symbol} — Raw oracle data:`);
+  console.log(`  info.price:          ${info.price.toString()}`);
+  console.log(`  info.decimal:        ${info.decimal}`);
+  console.log(`  info.lastUpdateTime: ${info.lastUpdateTime.toString()}`);
+
+  // Correct conversion
+  const exponent     = -Number(info.decimal);
+  const humanPrice   = Number(info.price) / 10 ** exponent;
+  console.log(`\n  Correct conversion:  $${humanPrice.toFixed(6)}`);
+  console.log(`  Formula:             ${info.price} ÷ 10^${exponent}`);
+}
+```
+
+### Common Causes and Fixes
+
+**Forgot to apply decimal scaling.** `info.price` is not a dollar amount. It is a scaled integer. `1000124000000000000` is `$1.000124`, not \$1 quadrillion.
+
+```solidity
+// ✅ Correct
+uint256 humanPrice = uint256(info.price) / 1e18;
+
+// ❌ Wrong — using raw price directly as a dollar amount
+uint256 humanPrice = uint256(info.price); // 1e18 times too large
+```
+
+**Hardcoded divisor doesn't match actual decimal.** All current feeds use `decimal = -18`, but always read `decimal` dynamically. Hardcoding `1e18` when the actual decimal is different produces a wrong result.
+
+```solidity
+// ✅ Future-proof — reads decimal dynamically
+uint256 humanPrice = uint256(info.price) / (10 ** uint8(-info.decimal));
+
+// ⚠️ Fragile — works now but breaks if a future feed uses different decimals
+uint256 humanPrice = uint256(info.price) / 1e18;
+```
+
+**Floating-point overflow in JavaScript.** `info.price` as a `BigInt` from ethers v6 may overflow JavaScript's `Number` type if converted naively. Use `ethers.formatUnits` or keep values as `BigInt`.
+
+```javascript
+// ✅ Correct — using ethers.formatUnits
+const price = ethers.formatUnits(info.price, -info.decimal);
+
+// ✅ Correct — using BigInt arithmetic
+const price = info.price * 1000000n / (10n ** BigInt(-info.decimal));
+
+// ❌ Wrong — Number() may lose precision for large BigInt values
+const price = Number(info.price) / 1e18; // may lose precision
+```
+
+**Multiplying two scaled values without normalizing.** If both values are scaled by `1e18`, the product is scaled by `1e36`. Always divide after multiplying.
+
+```solidity
+// ✅ Correct
+uint256 result = (amount * uint256(info.price)) / 1e18;
+
+// ❌ Wrong — result is 1e18 times too large
+uint256 result = amount * uint256(info.price);
+```
+
+---
+
+## Out of Gas
+
+Transactions consuming oracle prices are running out of gas.
+
+### Common Causes and Fixes
+
+**Oracle reads inside a loop.** Reading from the oracle inside a loop multiplies the gas cost by the loop length.
+
+```solidity
+// ✅ Correct — read once before the loop
+(IIfaPriceFeed.PriceFeed memory info,) = ORACLE.getAssetInfo(USDT_ASSET_ID);
+for (uint256 i = 0; i < positions.length; i++) {
+    positions[i].value = _calculate(info.price, info.decimal, positions[i].amount);
+}
+
+// ❌ Wrong — reads oracle on every iteration
+for (uint256 i = 0; i < positions.length; i++) {
+    (IIfaPriceFeed.PriceFeed memory info,) = ORACLE.getAssetInfo(USDT_ASSET_ID);
+    positions[i].value = _calculate(info.price, info.decimal, positions[i].amount);
+}
+```
+
+**Multiple individual reads instead of batch.** Use `getAssetsInfo` for any function that needs more than one price.
+
+```solidity
+// ✅ Correct — one call for three prices
+bytes32[] memory ids = new bytes32[](3);
+ids[0] = USDT_ASSET_ID;
+ids[1] = USDC_ASSET_ID;
+ids[2] = CNGN_ASSET_ID;
+(IIfaPriceFeed.PriceFeed[] memory infos,) = ORACLE.getAssetsInfo(ids);
+
+// ❌ Wrong — three separate calls
+(IIfaPriceFeed.PriceFeed memory usdt,) = ORACLE.getAssetInfo(USDT_ASSET_ID);
+(IIfaPriceFeed.PriceFeed memory usdc,) = ORACLE.getAssetInfo(USDC_ASSET_ID);
+(IIfaPriceFeed.PriceFeed memory cngn,) = ORACLE.getAssetInfo(CNGN_ASSET_ID);
+```
+
+**Oracle address or asset IDs stored in storage.** Declare constants at compile time to avoid cold SLOAD costs on every call.
+
+```solidity
+// ✅ Correct — zero runtime cost
+IIfaPriceFeed public constant ORACLE      = IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC);
+bytes32       public constant USDT_ASSET  = 0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d;
+
+// ❌ Wrong — 2,100 gas cold SLOAD on every access
+IIfaPriceFeed public oracle;
+bytes32       public usdtAsset;
+```
+
+---
+
+## `InvalidAssetIndexLength`
+
+Calling a batch derived pair function with arrays of different lengths.
+
+### Fix
+
+All input arrays to batch pair functions must be the same length. Check `_assetIndexes0`, `_assetsIndexes1`, and (for `getPairsbyId`) `_directions` — all must have identical lengths.
+
+```solidity
+// ✅ Correct — all arrays same length
+bytes32[] memory assets0    = new bytes32[](2);
+bytes32[] memory assets1    = new bytes32[](2);
+assets0[0] = CNGN_ASSET_ID; assets1[0] = USDT_ASSET_ID;
+assets0[1] = ZARP_ASSET_ID; assets1[1] = USDC_ASSET_ID;
+
+// ❌ Wrong — mismatched lengths
+bytes32[] memory assets0 = new bytes32[](2);
+bytes32[] memory assets1 = new bytes32[](1); // length mismatch → InvalidAssetIndexLength
+```
+
+---
+
+## Derived Pair Revert
+
+`getPairbyId` or batch pair functions are reverting unexpectedly.
+
+### Common Causes and Fixes
+
+**Self-pairing.** Passing the same asset ID for both parameters reverts. CNGN/CNGN is not a valid pair.
+
+```solidity
+// ❌ Wrong — self-pair reverts
+ORACLE.getPairbyId(CNGN_ASSET_ID, CNGN_ASSET_ID, PairDirection.Forward);
+
+// ✅ Correct
+ORACLE.getPairbyId(CNGN_ASSET_ID, USDT_ASSET_ID, PairDirection.Forward);
+```
+
+**Underlying feed missing or stale.** If either underlying USD feed is unavailable or has a zero price, the derived pair calculation reverts. Verify both feeds exist and are fresh before calling pair functions.
+
+```solidity
+// Check both feeds before calling getPairbyId
+(IIfaPriceFeed.PriceFeed memory info0, bool exists0) = ORACLE.getAssetInfo(assetId0);
+(IIfaPriceFeed.PriceFeed memory info1, bool exists1) = ORACLE.getAssetInfo(assetId1);
+
+require(exists0 && exists1,             "IFA: one or both feeds missing");
+require(info0.price > 0,               "IFA: feed0 price is zero");
+require(info1.price > 0,               "IFA: feed1 price is zero");
+
+// Safe to call derived pair
+ORACLE.getPairbyId(assetId0, assetId1, IIfaPriceFeed.PairDirection.Forward);
+```
+
+---
+
+## No Events Returned
+
+`queryFilter` for `PriceUpdated` returns an empty array.
+
+### Common Causes and Fixes
+
+**Block range too narrow.** Stablecoin feeds update infrequently — a 1,000-block range may contain no updates. Use at least 50,000 blocks for historical queries.
+
+```javascript
+// ✅ Correct — wide enough range
+const events = await oracle.queryFilter(
+  oracle.filters.PriceUpdated(assetId),
+  currentBlock - 50000,
+  currentBlock
+);
+
+// ❌ Likely too narrow — may return zero events
+const events = await oracle.queryFilter(
+  oracle.filters.PriceUpdated(assetId),
+  currentBlock - 100,
+  currentBlock
+);
+```
+
+**Asset ID not passed as filter.** Calling `queryFilter` without an asset ID filter returns all `PriceUpdated` events — not filtered by asset. Pass the asset ID as the first argument to the filter.
+
+```javascript
+// ✅ Correct — filtered by asset ID
+oracle.filters.PriceUpdated(CNGN_ASSET_ID)
+
+// ❌ Returns all PriceUpdated events — may be a very large result set
+oracle.filters.PriceUpdated()
+```
+
+**Wrong contract address.** Querying a testnet contract for mainnet events returns nothing. Confirm the oracle address matches the network you intend.
+
+---
+
+## WebSocket Disconnects
+
+Real-time event listener stops receiving events without throwing an error.
+
+### Fix
+
+WebSocket connections to RPC providers drop periodically. Implement reconnection logic:
+
+```javascript
+const { ethers } = require("ethers");
+
+const WSS_URL        = "wss://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY";
+const ORACLE_ADDRESS = "0xA9F17344689C2c2328F94464998db1d3e35B80dC";
+const ABI            = ["event PriceUpdated(bytes32 indexed assetId, int256 price, int8 decimal, uint64 timestamp)"];
+
+let provider;
+let oracle;
+
+function connect() {
+  provider = new ethers.WebSocketProvider(WSS_URL);
+
+  provider.websocket.on("close", () => {
+    console.log("WebSocket closed — reconnecting in 5s...");
+    setTimeout(connect, 5000);
+  });
+
+  provider.websocket.on("error", (err) => {
+    console.error("WebSocket error:", err.message);
+  });
+
+  oracle = new ethers.Contract(ORACLE_ADDRESS, ABI, provider);
+
+  oracle.on("PriceUpdated", (assetId, price, decimal, timestamp) => {
+    const humanPrice = Number(price) / 10 ** -Number(decimal);
+    console.log(`Update: $${humanPrice.toFixed(6)} at ${new Date(Number(timestamp) * 1000).toISOString()}`);
+  });
+
+  console.log("WebSocket connected");
+}
+
+connect();
+```
+
+---
+
+## RPC Rate Limiting
+
+Calls to the oracle are failing with rate limit errors from the RPC provider.
+
+### Fix
+
+The public Base RPC endpoint (`https://mainnet.base.org`) is rate-limited and not suitable for production monitoring or high-frequency queries. Switch to a dedicated provider:
+
+| Provider | Free Tier | Notes |
+| --- | --- | --- |
+| [Alchemy](https://alchemy.com) | 300M compute units/month | Recommended — generous free tier |
+| [QuickNode](https://quicknode.com) | Limited free tier | Good WebSocket support |
+| [Infura](https://infura.io) | 100K requests/day | Reliable, widely used |
+
+Update your RPC URL and, for the MCP server, pass `--rpc-url` with your dedicated endpoint:
+
+```bash
+ifa-mcp --network base-mainnet --rpc-url https://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY
+```
+
+---
+
+## Wrong Price on Testnet
+
+Testnet prices differ significantly from mainnet or behave unexpectedly.
+
+### Explanation and Fix
+
+Testnet oracle prices reflect testnet relayer activity — they are independent of mainnet. Testnet feeds may be less fresh, use slightly different source data, or differ from mainnet during low-activity periods. This is expected behaviour.
+
+**Confirm you are using the correct addresses per network:**
+
+| Network | Oracle Address |
+| --- | --- |
+| Base Mainnet | `0xA9F17344689C2c2328F94464998db1d3e35B80dC` |
+| Base Sepolia | `0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b` |
+| AssetChain Testnet | `0xBAc31e568883774A632275F9c8E7A5Bd117000F7` |
+
+Asset IDs are the same across all networks — only the contract address changes.
+
+---
+
+## Still Stuck?
+
+If your issue is not covered here:
+
+<CardGroup cols={3}>
+  <Card title="Error Code Reference" icon="code" href="/troubleshooting/error-code-reference">
+    Specific revert error codes and their meanings.
+  </Card>
+
+  <Card title="Price Appears Stale" icon="clock" href="/troubleshooting/price-appears-stale">
+    Dedicated guide for diagnosing and handling stale feed scenarios.
+  </Card>
+
+  <Card title="Get Help" icon="message" href="/support-and-community/get-help">
+    Contact the IFÁ Labs team directly.
+  </Card>
+</CardGroup>

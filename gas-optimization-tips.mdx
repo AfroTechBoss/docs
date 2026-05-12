@@ -1,0 +1,278 @@
+---
+title: "Gas Optimization Tips"
+description: "Practical patterns for minimizing the gas footprint of your IFÁ Labs oracle integration — from constants to batching to caching."
+---
+
+IFÁ Labs price reads are already among the cheapest external calls you can make in a Solidity contract — `getAssetInfo` is a pure storage read with no computation overhead. But in protocols that read prices frequently, across multiple assets, or inside functions called thousands of times, small inefficiencies compound into real costs.
+
+This page covers every meaningful optimization available for oracle integrations, ordered from highest to lowest impact.
+
+---
+
+## 1. Declare Constants at Compile Time
+
+The single highest-impact optimization. Declaring the oracle address and all asset IDs as `constant` eliminates every runtime lookup and computation associated with them.
+
+```solidity
+// ✅ Correct — resolved at compile time, zero runtime cost
+IIfaPriceFeed public constant ORACLE =
+    IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC);
+
+bytes32 public constant USDT_ASSET_ID =
+    0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d;
+
+bytes32 public constant CNGN_ASSET_ID =
+    0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a;
+```
+
+```solidity
+// ❌ Avoid — address loaded from storage on every call (cold SLOAD = 2,100 gas)
+IIfaPriceFeed public oracle;
+
+// ❌ Avoid — keccak256 computed at runtime on every call
+bytes32 public assetId = keccak256(abi.encodePacked("USDT/USD"));
+```
+
+**Impact:** A cold `SLOAD` costs 2,100 gas. A `constant` costs 0. On a protocol processing thousands of transactions per day, this difference is significant.
+
+---
+
+## 2. Batch Multiple Price Reads
+
+If your contract needs more than one price in the same transaction, always use `getAssetsInfo` instead of multiple `getAssetInfo` calls. One external call is cheaper than N external calls by a wide margin.
+
+```solidity
+// ✅ One external call for three prices
+bytes32[] memory ids = new bytes32[](3);
+ids[0] = USDT_ASSET_ID;
+ids[1] = USDC_ASSET_ID;
+ids[2] = CNGN_ASSET_ID;
+
+(IIfaPriceFeed.PriceFeed[] memory infos, bool[] memory exists) =
+    ORACLE.getAssetsInfo(ids);
+```
+
+```solidity
+// ❌ Three separate external calls — three times the overhead
+(IIfaPriceFeed.PriceFeed memory usdt,) = ORACLE.getAssetInfo(USDT_ASSET_ID);
+(IIfaPriceFeed.PriceFeed memory usdc,) = ORACLE.getAssetInfo(USDC_ASSET_ID);
+(IIfaPriceFeed.PriceFeed memory cngn,) = ORACLE.getAssetInfo(CNGN_ASSET_ID);
+```
+
+**Impact:** Each external call carries a fixed 100 gas base cost plus the call overhead. For three assets, batching saves roughly 200–400 gas per transaction before accounting for calldata differences.
+
+---
+
+## 3. Cache Prices for Repeated Access Within a Transaction
+
+If your contract reads the same price multiple times within a single transaction — across different internal functions — read it once and pass it as a parameter rather than calling the oracle repeatedly.
+
+```solidity
+// ✅ Read once, use everywhere
+function processPosition(bytes32 assetId, uint256 amount) external {
+    (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+        ORACLE.getAssetInfo(assetId);
+
+    require(exists, "IFA: asset not supported");
+
+    uint256 value    = _calculateValue(info.price, info.decimal, amount);
+    bool liquidatable = _checkLiquidation(info.price, info.decimal);
+    uint256 fee      = _calculateFee(info.price, info.decimal, amount);
+}
+
+function _calculateValue(int256 price, int8 decimal, uint256 amount)
+    internal
+    pure
+    returns (uint256)
+{
+    return uint256(price) * amount / (10 ** uint8(-decimal));
+}
+```
+
+```solidity
+// ❌ Reads oracle three times in the same transaction
+function processPosition(bytes32 assetId, uint256 amount) external {
+    uint256 value     = _calculateValue(assetId, amount);    // calls oracle
+    bool liquidatable = _checkLiquidation(assetId);          // calls oracle again
+    uint256 fee       = _calculateFee(assetId, amount);      // calls oracle again
+}
+```
+
+---
+
+## 4. Cache Prices Across Transactions (When Appropriate)
+
+For protocols where the same price is consumed many times per block or across short time windows, storing the last read price in contract storage avoids repeated oracle calls entirely.
+
+```solidity
+struct CachedPrice {
+    int256   price;
+    int8     decimal;
+    uint64   cachedAt;
+}
+
+mapping(bytes32 => CachedPrice) private _cache;
+uint256 public constant CACHE_TTL = 300; // 5 minutes
+
+function _getCachedOrFreshPrice(bytes32 assetId)
+    internal
+    returns (int256 price, int8 decimal)
+{
+    CachedPrice storage cached = _cache[assetId];
+
+    if (block.timestamp - cached.cachedAt <= CACHE_TTL) {
+        // Cache hit — return stored value
+        return (cached.price, cached.decimal);
+    }
+
+    // Cache miss — fetch from oracle and update
+    (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+        ORACLE.getAssetInfo(assetId);
+
+    require(exists, "IFA: asset not supported");
+    require(
+        block.timestamp - info.lastUpdateTime <= 3600,
+        "IFA: price feed is stale"
+    );
+
+    _cache[assetId] = CachedPrice({
+        price:    info.price,
+        decimal:  info.decimal,
+        cachedAt: uint64(block.timestamp)
+    });
+
+    return (info.price, info.decimal);
+}
+```
+
+<Warning>
+  Only cache prices for operations where a slightly stale value is acceptable. Never use a cached price for liquidation logic, collateral valuation, or any function where financial correctness depends on the most current available data.
+</Warning>
+
+---
+
+## 5. Pack Storage Structs Efficiently
+
+When storing oracle-related data in your own contract's storage, pack smaller types into single 32-byte slots to minimise `SSTORE` and `SLOAD` costs.
+
+```solidity
+// ✅ Efficient — price (32 bytes) gets its own slot,
+//    timestamp and decimal share the second slot (20 bytes total)
+struct OracleSnapshot {
+    int256  price;      // slot 0: 32 bytes
+    uint64  timestamp;  // slot 1: 8 bytes  ─┐
+    int8    decimal;    // slot 1: 1 byte    ─┘ packed together
+}
+```
+
+```solidity
+// ❌ Inefficient — each field gets its own 32-byte slot (96 bytes total)
+struct OracleSnapshot {
+    int256  price;
+    uint256 timestamp; // uint256 forces its own slot
+    int256  decimal;   // int256 forces its own slot
+}
+```
+
+**Impact:** The efficient struct uses 2 storage slots instead of 3 — a 33% reduction in storage costs for every read and write.
+
+---
+
+## 6. Avoid Oracle Reads in Loops
+
+Reading from the oracle inside a loop is an expensive pattern that scales linearly with iteration count. Pull prices out of loops wherever possible.
+
+```solidity
+// ✅ Read price once before the loop
+(IIfaPriceFeed.PriceFeed memory info,) = ORACLE.getAssetInfo(USDT_ASSET_ID);
+
+for (uint256 i = 0; i < positions.length; i++) {
+    positions[i].value = _calculate(info.price, info.decimal, positions[i].amount);
+}
+```
+
+```solidity
+// ❌ Reads oracle on every iteration
+for (uint256 i = 0; i < positions.length; i++) {
+    (IIfaPriceFeed.PriceFeed memory info,) = ORACLE.getAssetInfo(USDT_ASSET_ID);
+    positions[i].value = _calculate(info.price, info.decimal, positions[i].amount);
+}
+```
+
+If positions reference different assets, fetch all required prices via `getAssetsInfo` before entering the loop rather than calling `getAssetInfo` individually on each iteration.
+
+---
+
+## 7. Use `immutable` for Constructor-Set Addresses
+
+If the oracle address needs to be set at deployment time rather than hardcoded as a `constant` — for example, to support different addresses across test and production deployments via a deploy script — use `immutable` instead of a storage variable.
+
+```solidity
+IIfaPriceFeed public immutable ORACLE;
+
+constructor(address oracleAddress) {
+    ORACLE = IIfaPriceFeed(oracleAddress);
+}
+```
+
+`immutable` variables are embedded directly in the contract bytecode at deployment. Reading them costs the same as a `constant` — zero storage access — while giving you deployment-time flexibility.
+
+---
+
+## Gas Cost Reference
+
+A practical reference for the operations discussed on this page:
+
+| Operation | Approximate Gas Cost | Notes |
+| --- | --- | --- |
+| `getAssetInfo` (single) | ~2,500 | View call — free when called externally, costs gas inside a transaction |
+| `getAssetsInfo` (batch of 3) | ~4,500 | Roughly 1,500 per asset vs ~2,500 per separate call |
+| Cold `SLOAD` (storage read) | 2,100 | Avoided entirely by using `constant` |
+| Warm `SLOAD` (storage read) | 100 | Second access to same slot in same transaction |
+| `SSTORE` (storage write) | 20,000 (cold) / 2,900 (warm) | Relevant when caching prices to storage |
+| `constant` / `immutable` access | 0 | Resolved at compile time or embedded in bytecode |
+
+<Note>
+  All gas figures are approximate and based on current EVM opcode pricing. Actual costs depend on the specific execution context, compiler version, and optimiser settings. Always benchmark with Foundry's gas reporter or Hardhat's gas reporter plugin against your actual contract before drawing conclusions.
+</Note>
+
+---
+
+## Optimisation Checklist
+
+Before deploying any contract that consumes IFÁ Labs price feeds, run through this list:
+
+<Steps>
+  <Step title="Constants declared">
+    Oracle address and all asset IDs are `constant` or `immutable`. No runtime `keccak256` calls. No storage variables for the oracle address.
+  </Step>
+  <Step title="Batch reads used">
+    Any function that needs more than one price uses `getAssetsInfo`. No consecutive `getAssetInfo` calls for different assets in the same function.
+  </Step>
+  <Step title="No oracle reads in loops">
+    Prices are fetched before loops, not inside them. For multi-asset loops, all prices are pre-fetched via `getAssetsInfo`.
+  </Step>
+  <Step title="Structs packed">
+    Any custom structs storing oracle data use the smallest appropriate types (`uint64` for timestamps, `int8` for decimals) and are ordered to minimise slot usage.
+  </Step>
+  <Step title="Caching evaluated">
+    If the same price is read multiple times in a transaction, it's fetched once and passed as a parameter. Cross-transaction caching is only used for non-critical paths.
+  </Step>
+  <Step title="Gas benchmarked">
+    Integration has been tested with a gas reporter tool and costs are within acceptable bounds for the protocol's expected transaction volume.
+  </Step>
+</Steps>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Complete Example Contract" icon="file-code" href="/integration-guides/evm-smart-contracts/complete-example-contract">
+    See all patterns — reads, verification, batching, and gas optimisation — combined in a single production-ready contract.
+  </Card>
+
+  <Card title="Core Concepts" icon="book" href="/core-concepts/how-ifa-aggregates-prices">
+    Understand the oracle mechanics behind the price data your contracts consume.
+  </Card>
+</CardGroup>

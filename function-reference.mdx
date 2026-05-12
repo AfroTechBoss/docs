@@ -1,0 +1,411 @@
+---
+title: "Function Reference"
+description: "Complete API reference for every function exposed by the IFÁ Labs oracle contract — signatures, parameters, return types, and usage notes."
+---
+
+The IFÁ Labs oracle contract exposes a focused set of read-only functions for querying price data. All functions are `view` — they cost no gas when called externally and have no side effects. This page is the complete reference for every function, struct, and enum in the contract interface.
+
+---
+
+## Data Types
+
+Before the function reference, the types returned by the contract:
+
+### `PriceFeed` Struct
+
+The primary return type for all single-asset price queries.
+
+```solidity
+struct PriceFeed {
+    int256  price;           // Scaled price value
+    int8    decimal;         // Negative exponent — divide by 10^(-decimal) for human-readable price
+    uint256 lastUpdateTime;  // Unix timestamp of the last on-chain update
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `price` | `int256` | Raw scaled price. For `decimal = -18`, divide by `1e18` for the human-readable value. Always positive for current feeds. |
+| `decimal` | `int8` | Negative scaling exponent. All current feeds return `-18`. Read dynamically — do not hardcode. |
+| `lastUpdateTime` | `uint256` | Unix timestamp of the last submitted price update. Use this for staleness checks. |
+
+---
+
+### `DerivedPair` Struct
+
+The return type for cross-asset pair calculations.
+
+```solidity
+struct DerivedPair {
+    int256  price;           // Derived cross-asset price, scaled
+    int8    decimal;         // Negative exponent for scaling
+    uint256 lastUpdateTime;  // Timestamp of the most recent underlying feed update
+}
+```
+
+The `lastUpdateTime` for a derived pair reflects the **older** of the two underlying feed timestamps — the derived price is only as fresh as its least-recently-updated component.
+
+---
+
+### `PairDirection` Enum
+
+Controls the direction of a derived pair calculation.
+
+```solidity
+enum PairDirection {
+    Forward,   // asset0 priced in asset1 terms: "how much asset1 is one asset0 worth?"
+    Backward   // asset1 priced in asset0 terms: "how much asset0 is one asset1 worth?"
+}
+```
+
+| Value | Meaning | Example |
+| --- | --- | --- |
+| `Forward` | asset0 / asset1 | `getPairbyId(CNGN, USDT, Forward)` → CNGN/USDT rate |
+| `Backward` | asset1 / asset0 | `getPairbyId(CNGN, USDT, Backward)` → USDT/CNGN rate |
+
+---
+
+## Functions
+
+### `getAssetInfo`
+
+Fetches the current price feed for a single asset.
+
+```solidity
+function getAssetInfo(bytes32 _assetIndex)
+    external
+    view
+    returns (PriceFeed memory assetInfo, bool exist);
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `_assetIndex` | `bytes32` | The asset ID — `keccak256(abi.encodePacked("SYMBOL/USD"))` |
+
+**Returns:**
+
+| Return Value | Type | Description |
+| --- | --- | --- |
+| `assetInfo` | `PriceFeed` | Price, decimal, and last update timestamp |
+| `exist` | `bool` | `true` if the asset is supported and has data. `false` if the asset ID is not recognised. |
+
+**Behaviour:**
+
+- Returns `exist = false` for unrecognised asset IDs. Does not revert.
+- `assetInfo` fields are zero-valued when `exist = false`. Always check `exist` before using `assetInfo`.
+- Safe to call with any `bytes32` value — will never revert on invalid input.
+
+**Example:**
+
+```solidity
+bytes32 USDT_ID = 0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d;
+
+(IIfaPriceFeed.PriceFeed memory info, bool exists) = ORACLE.getAssetInfo(USDT_ID);
+
+require(exists, "Asset not supported");
+require(block.timestamp - info.lastUpdateTime <= 3600, "Price stale");
+
+uint256 price = uint256(info.price) / 1e18;
+```
+
+---
+
+### `getAssetsInfo`
+
+Batch version of `getAssetInfo`. Fetches price feeds for multiple assets in a single call.
+
+```solidity
+function getAssetsInfo(bytes32[] calldata _assetIndexes)
+    external
+    view
+    returns (PriceFeed[] memory infos, bool[] memory exists);
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `_assetIndexes` | `bytes32[]` | Array of asset IDs to query |
+
+**Returns:**
+
+| Return Value | Type | Description |
+| --- | --- | --- |
+| `infos` | `PriceFeed[]` | Array of price feeds — same order as input |
+| `exists` | `bool[]` | Array of existence flags — same order as input |
+
+**Behaviour:**
+
+- Results are returned in the same order as the input array.
+- Each element in `exists` corresponds to the same-index element in `infos`.
+- Does not revert if an asset ID is unrecognised — returns `exists[i] = false` for that element.
+- Always check `exists[i]` before using `infos[i]`.
+
+**Example:**
+
+```solidity
+bytes32[] memory ids = new bytes32[](3);
+ids[0] = USDT_ASSET_ID;
+ids[1] = USDC_ASSET_ID;
+ids[2] = CNGN_ASSET_ID;
+
+(IIfaPriceFeed.PriceFeed[] memory infos, bool[] memory exists) =
+    ORACLE.getAssetsInfo(ids);
+
+for (uint256 i = 0; i < ids.length; i++) {
+    require(exists[i], "Unsupported asset in batch");
+    // Use infos[i].price, infos[i].decimal, infos[i].lastUpdateTime
+}
+```
+
+<Tip>
+  Use `getAssetsInfo` any time your contract needs more than one price in the same transaction. One external call is significantly cheaper than N consecutive `getAssetInfo` calls.
+</Tip>
+
+---
+
+### `getPairbyId`
+
+Computes a derived cross-asset price for a single pair.
+
+```solidity
+function getPairbyId(
+    bytes32      _assetIndex0,
+    bytes32      _assetIndex1,
+    PairDirection _direction
+)
+    external
+    view
+    returns (DerivedPair memory);
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `_assetIndex0` | `bytes32` | Asset ID of the first asset |
+| `_assetIndex1` | `bytes32` | Asset ID of the second asset |
+| `_direction` | `PairDirection` | `Forward` for asset0/asset1, `Backward` for asset1/asset0 |
+
+**Returns:**
+
+| Return Value | Type | Description |
+| --- | --- | --- |
+| `DerivedPair` | `DerivedPair` | Derived price, decimal, and the older of the two underlying timestamps |
+
+**Behaviour:**
+
+- Both underlying USD feeds must exist and be non-zero. If either is missing, the function reverts.
+- Self-pairing (same asset ID for both parameters) is blocked — reverts with an error.
+- `lastUpdateTime` reflects the older of the two underlying feed timestamps.
+
+**Example:**
+
+```solidity
+// How much USDT is one CNGN worth?
+IIfaPriceFeed.DerivedPair memory pair = ORACLE.getPairbyId(
+    CNGN_ASSET_ID,
+    USDT_ASSET_ID,
+    IIfaPriceFeed.PairDirection.Forward
+);
+
+uint256 cngnInUsdt = uint256(pair.price) / 1e18;
+```
+
+---
+
+### `getPairsbyIdForward`
+
+Batch derived pair calculation — all pairs in the forward direction.
+
+```solidity
+function getPairsbyIdForward(
+    bytes32[] calldata _assetIndexes0,
+    bytes32[] calldata _assetsIndexes1
+)
+    external
+    view
+    returns (DerivedPair[] memory);
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `_assetIndexes0` | `bytes32[]` | Array of first assets (numerator) |
+| `_assetsIndexes1` | `bytes32[]` | Array of second assets (denominator) |
+
+**Returns:** Array of `DerivedPair` structs — same order as inputs.
+
+**Behaviour:**
+
+- Input arrays must be the same length. Mismatched lengths revert with `InvalidAssetIndexLength`.
+- Each pair is computed independently. A failure in one pair reverts the entire call.
+
+**Example:**
+
+```solidity
+bytes32[] memory assets0 = new bytes32[](2);
+bytes32[] memory assets1 = new bytes32[](2);
+
+assets0[0] = CNGN_ASSET_ID; assets1[0] = USDT_ASSET_ID;
+assets0[1] = ZARP_ASSET_ID; assets1[1] = USDC_ASSET_ID;
+
+IIfaPriceFeed.DerivedPair[] memory pairs =
+    ORACLE.getPairsbyIdForward(assets0, assets1);
+
+// pairs[0] = CNGN/USDT
+// pairs[1] = ZARP/USDC
+```
+
+---
+
+### `getPairsbyIdBackward`
+
+Batch derived pair calculation — all pairs in the backward direction.
+
+```solidity
+function getPairsbyIdBackward(
+    bytes32[] calldata _assetIndexes0,
+    bytes32[] calldata _assetsIndexes1
+)
+    external
+    view
+    returns (DerivedPair[] memory);
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `_assetIndexes0` | `bytes32[]` | Array of first assets |
+| `_assetsIndexes1` | `bytes32[]` | Array of second assets |
+
+**Returns:** Array of `DerivedPair` structs in backward direction — asset1 priced in asset0 terms.
+
+**Behaviour:** Identical to `getPairsbyIdForward` except direction is reversed for all pairs. Same length requirement and revert behaviour apply.
+
+**Example:**
+
+```solidity
+// How much CNGN is one USDT worth?
+bytes32[] memory assets0 = new bytes32[](1);
+bytes32[] memory assets1 = new bytes32[](1);
+
+assets0[0] = CNGN_ASSET_ID;
+assets1[0] = USDT_ASSET_ID;
+
+IIfaPriceFeed.DerivedPair[] memory pairs =
+    ORACLE.getPairsbyIdBackward(assets0, assets1);
+
+// pairs[0] = USDT/CNGN (how many CNGN per USDT)
+```
+
+---
+
+### `getPairsbyId`
+
+Batch derived pair calculation with per-pair direction control.
+
+```solidity
+function getPairsbyId(
+    bytes32[]      calldata _assetIndexes0,
+    bytes32[]      calldata _assetsIndexes1,
+    PairDirection[] calldata _directions
+)
+    external
+    view
+    returns (DerivedPair[] memory);
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `_assetIndexes0` | `bytes32[]` | Array of first assets |
+| `_assetsIndexes1` | `bytes32[]` | Array of second assets |
+| `_directions` | `PairDirection[]` | Per-pair direction — must be the same length as asset arrays |
+
+**Returns:** Array of `DerivedPair` structs — each computed with its specified direction.
+
+**Behaviour:**
+
+- All three input arrays must be the same length. Mismatched lengths revert with `InvalidAssetOrDirectionLength`.
+- Use this function when you need a mix of forward and backward pairs in a single call.
+
+**Example:**
+
+```solidity
+bytes32[]       memory assets0    = new bytes32[](2);
+bytes32[]       memory assets1    = new bytes32[](2);
+PairDirection[] memory directions = new PairDirection[](2);
+
+assets0[0]    = CNGN_ASSET_ID;
+assets1[0]    = USDT_ASSET_ID;
+directions[0] = IIfaPriceFeed.PairDirection.Forward;   // CNGN/USDT
+
+assets0[1]    = USDT_ASSET_ID;
+assets1[1]    = ZARP_ASSET_ID;
+directions[1] = IIfaPriceFeed.PairDirection.Backward;  // ZARP/USDT
+
+IIfaPriceFeed.DerivedPair[] memory pairs =
+    ORACLE.getPairsbyId(assets0, assets1, directions);
+```
+
+---
+
+## Custom Errors
+
+The contract uses custom errors for gas-efficient reverts. These are the errors you may encounter when calling derived pair functions:
+
+| Error | Signature | When It Occurs |
+| --- | --- | --- |
+| `InvalidAssetIndexLength` | `InvalidAssetIndexLength(uint256 len0, uint256 len1)` | Batch function receives arrays of different lengths |
+| `InvalidAssetOrDirectionLength` | `InvalidAssetOrDirectionLength(uint256 len0, uint256 len1, uint256 lenDir)` | `getPairsbyId` receives mismatched array lengths |
+
+Note: `getAssetInfo` and `getAssetsInfo` do not revert on unsupported assets — they return `exist = false`. Only derived pair functions can revert due to missing or invalid underlying feeds.
+
+---
+
+## Quick Reference
+
+| Function | Assets | Direction Control | Reverts on Bad Input |
+| --- | --- | --- | --- |
+| `getAssetInfo` | Single | N/A | No — returns `exist = false` |
+| `getAssetsInfo` | Batch | N/A | No — returns `exists[i] = false` |
+| `getPairbyId` | Single pair | Per call | Yes — missing feed or self-pair |
+| `getPairsbyIdForward` | Batch | All forward | Yes — array length mismatch |
+| `getPairsbyIdBackward` | Batch | All backward | Yes — array length mismatch |
+| `getPairsbyId` | Batch | Per pair | Yes — array length mismatch |
+
+---
+
+## Installing the Interface
+
+The full interface with all types, functions, and natspec documentation is available via npm:
+
+```bash
+npm install ifapricefeed-interface
+```
+
+```solidity
+import "ifapricefeed-interface/IIfaPriceFeed.sol";
+```
+
+Source: [github.com/IFA-Labs/IfaPriceFeed-interface](https://github.com/IFA-Labs/IfaPriceFeed-interface)
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Event Reference" icon="bell" href="/onchain-reference/smart-contracts/event-reference">
+    Events emitted by the oracle contract for monitoring and indexing.
+  </Card>
+
+  <Card title="Complete Example Contract" icon="file-code" href="/integration-guides/evm-smart-contracts/complete-example-contract">
+    See all functions used together in a production-ready integration.
+  </Card>
+</CardGroup>

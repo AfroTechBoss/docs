@@ -1,0 +1,352 @@
+---
+title: "Network Information"
+description: "RPC endpoints, chain IDs, block explorers, oracle addresses, and faucet links for every network supported by IFÁ Labs."
+---
+
+This page is the complete network reference for IFÁ Labs deployments. Use it when configuring wallets, development tools, deploy scripts, monitoring infrastructure, or MCP server connections.
+
+---
+
+## Supported Networks
+
+### Base Mainnet
+
+The primary production deployment. All protocol integrations should target Base Mainnet.
+
+| Parameter | Value |
+| --- | --- |
+| **Network Name** | Base |
+| **Chain ID** | 8453 |
+| **RPC URL** | `https://mainnet.base.org` |
+| **WebSocket URL** | `wss://mainnet.base.org` |
+| **Currency** | ETH |
+| **Block Explorer** | [basescan.org](https://basescan.org) |
+| **Oracle Address** | `0xA9F17344689C2c2328F94464998db1d3e35B80dC` |
+| **Oracle on Basescan** | [View contract](https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC) |
+| **Read Contract** | [Read functions](https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC#readContract) |
+| **Event Log** | [PriceUpdated events](https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC#events) |
+| **Status** | Live ✓ |
+
+---
+
+### Base Sepolia
+
+The recommended testnet for all development and testing. Mirror of Base Mainnet with identical oracle interface and asset IDs.
+
+| Parameter | Value |
+| --- | --- |
+| **Network Name** | Base Sepolia |
+| **Chain ID** | 84532 |
+| **RPC URL** | `https://sepolia.base.org` |
+| **WebSocket URL** | `wss://sepolia.base.org` |
+| **Currency** | ETH (test) |
+| **Block Explorer** | [sepolia.basescan.org](https://sepolia.basescan.org) |
+| **Oracle Address** | `0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b` |
+| **Oracle on Basescan** | [View contract](https://sepolia.basescan.org/address/0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b) |
+| **Read Contract** | [Read functions](https://sepolia.basescan.org/address/0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b#readContract) |
+| **Faucet** | [base.org/faucet](https://www.base.org/faucet) |
+| **Status** | Testnet |
+
+---
+
+### AssetChain Testnet
+
+Early integration deployment for the AssetChain RWA-focused ecosystem. Oracle interface and asset IDs are identical to Base deployments.
+
+| Parameter | Value |
+| --- | --- |
+| **Network Name** | AssetChain Testnet |
+| **Chain ID** | 42421 |
+| **RPC URL** | `https://enugu-rpc.assetchain.org` |
+| **Currency** | Test Token |
+| **Block Explorer** | [scan-testnet.assetchain.org](https://scan-testnet.assetchain.org) |
+| **Oracle Address** | `0xBAc31e568883774A632275F9c8E7A5Bd117000F7` |
+| **Oracle on Explorer** | [View contract](https://scan-testnet.assetchain.org/address/0xBAc31e568883774A632275F9c8E7A5Bd117000F7) |
+| **Status** | Testnet |
+
+---
+
+## Upcoming Networks
+
+| Network | Chain ID | Status | Target |
+| --- | --- | --- | --- |
+| **AssetChain Mainnet** | TBD | Planned | TBD |
+| **Solana** | N/A | Planned | TBD |
+| **Optimism** | 10 | Planned | TBD |
+| **Arbitrum One** | 42161 | Planned | TBD |
+| **Polygon zkEVM** | 1101 | Planned | TBD |
+
+<Note>
+  Contract addresses for upcoming deployments will be added to this page on launch day. Follow [@ifalabs](https://x.com/ifalabs) and join the [Telegram](https://t.me/ifalabs) for deployment announcements.
+</Note>
+
+---
+
+## Adding Networks to MetaMask
+
+### Automatic — ChainList
+
+The fastest method. Visit [chainlist.org](https://chainlist.org), search for "Base" or "AssetChain", and click **Add to MetaMask**. The network parameters are added automatically.
+
+### Manual Configuration
+
+<Tabs>
+  <Tab title="Base Mainnet">
+    In MetaMask → Settings → Networks → Add Network → Add a network manually:
+
+    ```text
+        Network Name:    Base
+        RPC URL:         https://mainnet.base.org
+        Chain ID:        8453
+        Currency Symbol: ETH
+        Block Explorer:  https://basescan.org
+    ```
+  </Tab>
+  <Tab title="Base Sepolia">
+    ```text
+        Network Name:    Base Sepolia
+        RPC URL:         https://sepolia.base.org
+        Chain ID:        84532
+        Currency Symbol: ETH
+        Block Explorer:  https://sepolia.basescan.org
+    ```
+  </Tab>
+  <Tab title="AssetChain Testnet">
+    ```text
+        Network Name:    AssetChain Testnet
+        RPC URL:         https://enugu-rpc.assetchain.org
+        Chain ID:        42421
+        Currency Symbol: XRP
+        Block Explorer:  https://scan-testnet.assetchain.org
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## RPC Configuration for Development Tools
+
+### Foundry (`foundry.toml`)
+
+```toml
+[profile.default]
+src  = "src"
+out  = "out"
+libs = ["lib"]
+
+[rpc_endpoints]
+base-mainnet       = "https://mainnet.base.org"
+base-sepolia       = "https://sepolia.base.org"
+assetchain-testnet = "https://enugu-rpc.assetchain.org"
+
+# Or use environment variables for dedicated providers
+# base-mainnet = "${BASE_MAINNET_RPC_URL}"
+# base-sepolia = "${BASE_SEPOLIA_RPC_URL}"
+```
+
+Use in scripts and tests:
+
+```bash
+# Deploy to Base Mainnet
+forge script script/Deploy.s.sol \
+  --rpc-url base-mainnet \
+  --broadcast
+
+# Fork Base Mainnet for local testing
+anvil --fork-url https://mainnet.base.org
+```
+
+---
+
+### Hardhat (`hardhat.config.js`)
+
+```javascript
+require("@nomicfoundation/hardhat-toolbox");
+
+module.exports = {
+  networks: {
+    "base-mainnet": {
+      url:      process.env.BASE_MAINNET_RPC_URL ?? "https://mainnet.base.org",
+      chainId:  8453,
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+    },
+    "base-sepolia": {
+      url:      process.env.BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org",
+      chainId:  84532,
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+    },
+    "assetchain-testnet": {
+      url:      "https://enugu-rpc.assetchain.org",
+      chainId:  42421,
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+    },
+  },
+  etherscan: {
+    apiKey: {
+      "base-mainnet": process.env.BASESCAN_API_KEY ?? "",
+      "base-sepolia": process.env.BASESCAN_API_KEY ?? "",
+    },
+    customChains: [
+      {
+        network:  "base-mainnet",
+        chainId:  8453,
+        urls: {
+          apiURL:     "https://api.basescan.org/api",
+          browserURL: "https://basescan.org",
+        },
+      },
+      {
+        network:  "base-sepolia",
+        chainId:  84532,
+        urls: {
+          apiURL:     "https://api-sepolia.basescan.org/api",
+          browserURL: "https://sepolia.basescan.org",
+        },
+      },
+    ],
+  },
+};
+```
+
+---
+
+### ethers.js / viem
+
+```javascript
+// ethers.js v6
+import { ethers } from "ethers";
+
+const PROVIDERS = {
+  "base-mainnet": new ethers.JsonRpcProvider("https://mainnet.base.org"),
+  "base-sepolia": new ethers.JsonRpcProvider("https://sepolia.base.org"),
+  "assetchain-testnet": new ethers.JsonRpcProvider("https://enugu-rpc.assetchain.org"),
+};
+```
+
+```typescript
+// viem
+import { createPublicClient, http } from "viem";
+import { base, baseSepolia } from "viem/chains";
+
+const mainnetClient = createPublicClient({
+  chain:     base,
+  transport: http(),
+});
+
+const testnetClient = createPublicClient({
+  chain:     baseSepolia,
+  transport: http(),
+});
+```
+
+---
+
+## Oracle Addresses by Network
+
+Quick reference — all oracle addresses in one place:
+
+```javascript
+export const IFA_ORACLE_ADDRESSES = {
+  "base-mainnet":       "0xA9F17344689C2c2328F94464998db1d3e35B80dC",
+  "base-sepolia":       "0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b",
+  "assetchain-testnet": "0xBAc31e568883774A632275F9c8E7A5Bd117000F7",
+} as const;
+
+export const IFA_RPC_URLS = {
+  "base-mainnet":       "https://mainnet.base.org",
+  "base-sepolia":       "https://sepolia.base.org",
+  "assetchain-testnet": "https://enugu-rpc.assetchain.org",
+} as const;
+
+export const IFA_CHAIN_IDS = {
+  "base-mainnet":       8453,
+  "base-sepolia":       84532,
+  "assetchain-testnet": 42421,
+} as const;
+```
+
+---
+
+## Faucets
+
+| Network | Faucet | Notes |
+| --- | --- | --- |
+| **Base Sepolia** | [base.org/faucet](https://www.base.org/faucet) | Official — daily limit applies |
+| **Base Sepolia** | [alchemy.com/faucets/base-sepolia](https://www.alchemy.com/faucets/base-sepolia) | Requires free Alchemy account |
+| **Base Sepolia** | [faucet.quicknode.com/base/sepolia](https://faucet.quicknode.com/base/sepolia) | No account required |
+| **Base Sepolia** | [infura.io/faucet/sepolia](https://www.infura.io/faucet/sepolia) | Requires free Infura account |
+
+<Note>
+  IFÁ Labs price reads are view calls — they cost no gas and require no ETH. You only need testnet ETH if you are deploying your own contracts that consume IFÁ Labs feeds.
+</Note>
+
+---
+
+## Recommended RPC Providers
+
+The public RPC endpoints listed above are suitable for development and low-frequency queries. For production monitoring, high-frequency scripts, or WebSocket event listeners, use a dedicated provider:
+
+| Provider | Free Tier | WebSocket | Notes |
+| --- | --- | --- | --- |
+| [Alchemy](https://alchemy.com) | 300M compute units/month | ✓ | Recommended — generous free tier, reliable WebSocket |
+| [QuickNode](https://quicknode.com) | Limited | ✓ | Strong WebSocket support |
+| [Infura](https://infura.io) | 100K requests/day | ✓ | Reliable, widely used |
+| [Ankr](https://ankr.com) | 500 req/s | ✓ | Good free tier for Base |
+| [Drpc](https://drpc.org) | Generous free tier | ✓ | Decentralized RPC network |
+
+Configure your chosen provider in the MCP server:
+
+```bash
+ifa-mcp --network base-mainnet \
+  --rpc-url https://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY
+```
+
+---
+
+## Network Quick Reference Card
+
+For teams that want a single printable reference:
+
+```text
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+IFÁ LABS — NETWORK QUICK REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+BASE MAINNET (Production)
+  Chain ID:  8453
+  Oracle:    0xA9F17344689C2c2328F94464998db1d3e35B80dC
+  RPC:       https://mainnet.base.org
+  Explorer:  https://basescan.org
+
+BASE SEPOLIA (Testnet)
+  Chain ID:  84532
+  Oracle:    0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b
+  RPC:       https://sepolia.base.org
+  Explorer:  https://sepolia.basescan.org
+  Faucet:    https://www.base.org/faucet
+
+ASSETCHAIN TESTNET
+  Chain ID:  42421
+  Oracle:    0xBAc31e568883774A632275F9c8E7A5Bd117000F7
+  RPC:       https://enugu-rpc.assetchain.org
+  Explorer:  https://scan-testnet.assetchain.org
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Asset IDs are identical across all networks.
+See docs.ifalabs.com/reference/supported-assets
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Contract Addresses" icon="file-contract" href="/onchain-reference/smart-contracts/contract-addresses">
+    Verified contract addresses with block explorer links and deployment verification steps.
+  </Card>
+
+  <Card title="Changelog" icon="clock-rotate-left" href="/reference/changelog">
+    Track updates, new deployments, and breaking changes.
+  </Card>
+</CardGroup>

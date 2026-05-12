@@ -1,0 +1,224 @@
+---
+title: "Get Your First Price"
+description: "Fetch a live stablecoin price from the IFÁ Labs oracle on-chain — using Remix IDE, Basescan, or a script."
+---
+
+This page walks you through three ways to fetch a price from the IFÁ Labs oracle. All three work on Base Mainnet and Base Sepolia. Choose the one that fits where you are in your development workflow.
+
+| Method | Best For | Setup Required |
+| --- | --- | --- |
+| **Remix IDE** | Beginners, quick prototyping | None — browser-based |
+| **Basescan** | Instant read, no coding | None |
+| **ethers.js Script** | Frontend integrations, automation | Node.js |
+
+---
+
+## Method 1: Remix IDE
+
+The fastest way to fetch a price without any local setup.
+
+<Steps>
+  <Step title="Open Remix IDE">
+    Go to [remix.ethereum.org](https://remix.ethereum.org) in your browser.
+  </Step>
+  <Step title="Create a new file">
+    In the File Explorer, create a new file called `PriceReader.sol` and paste the following:
+
+    ```solidity
+        // SPDX-License-Identifier: MIT
+        pragma solidity ^0.8.0;
+    
+        interface IIfaPriceFeed {
+            struct PriceFeed {
+                int256 price;
+                int8 decimal;
+                uint256 lastUpdateTime;
+            }
+    
+            function getAssetInfo(bytes32 assetId)
+                external
+                view
+                returns (PriceFeed memory assetInfo, bool exists);
+        }
+    
+        contract PriceReader {
+            // Base Mainnet oracle address
+            IIfaPriceFeed public constant ORACLE =
+                IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC);
+    
+            // USDT/USD asset ID
+            bytes32 public constant USDT_ASSET_ID =
+                0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d;
+    
+            function getUSDTPrice()
+                external
+                view
+                returns (
+                    int256 price,
+                    int8 decimal,
+                    uint256 timestamp,
+                    bool exists
+                )
+            {
+                (IIfaPriceFeed.PriceFeed memory info, bool _exists) =
+                    ORACLE.getAssetInfo(USDT_ASSET_ID);
+    
+                return (info.price, info.decimal, info.lastUpdateTime, _exists);
+            }
+        }
+    ```
+  </Step>
+  <Step title="Compile the contract">
+    Open the **Solidity Compiler** tab. Set the compiler version to `0.8.0` or higher and click **Compile PriceReader.sol**.
+  </Step>
+  <Step title="Deploy and call">
+    Open the **Deploy & Run Transactions** tab.
+
+    - Set **Environment** to `Injected Provider - MetaMask`
+    - Make sure MetaMask is connected to **Base Mainnet** or **Base Sepolia**
+    - Click **Deploy**
+    - Once deployed, click **getUSDTPrice** under the deployed contract
+
+    You'll see four return values: `price`, `decimal`, `timestamp`, and `exists`.
+  </Step>
+</Steps>
+
+**Interpreting the result:**
+
+```text
+price:      1000000000000000000  (1e18)
+decimal:    -18
+timestamp:  1748601234           (Unix timestamp)
+exists:     true
+```
+
+Human-readable price = `price ÷ 10^(-decimal)` = `1e18 ÷ 10^18` = **\$1.00**
+
+For any stablecoin near its peg, expect a value close to `1e18` with `decimal = -18`.
+
+---
+
+## Method 2: Basescan
+
+No coding required. Read directly from the deployed contract via the block explorer.
+
+<Steps>
+  <Step title="Open the contract on Basescan">
+    - **Mainnet:** [basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC#readContract](https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC#readContract)
+    - **Sepolia:** [sepolia.basescan.org/address/0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b#readContract](https://sepolia.basescan.org/address/0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b#readContract)
+  </Step>
+  <Step title="Find getAssetInfo">
+    Scroll to the `getAssetInfo` function in the Read Contract tab.
+  </Step>
+  <Step title="Enter an asset ID and query">
+    Paste an asset ID from the table below and click **Query**.
+
+    Results appear instantly — no wallet connection needed for read calls.
+  </Step>
+</Steps>
+
+---
+
+## Method 3: ethers.js Script
+
+For developers integrating IFÁ Labs into a frontend, backend, or automated workflow.
+
+```javascript
+const { ethers } = require("ethers");
+
+const ORACLE_ADDRESS = "0xA9F17344689C2c2328F94464998db1d3e35B80dC"; // Base Mainnet
+const RPC_URL = "https://mainnet.base.org";
+
+const ABI = [
+  "function getAssetInfo(bytes32 assetId) view returns ((int256 price, int8 decimal, uint256 lastUpdateTime) assetInfo, bool exists)"
+];
+
+const ASSET_IDS = {
+  "USDT/USD": "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d",
+  "USDC/USD": "0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d",
+  "CNGN/USD": "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a",
+  "BRZ/USD":  "0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5",
+  "ZARP/USD": "0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8"
+};
+
+async function getPrice(symbol) {
+  const provider = new ethers.JsonRpcProvider(RPC_URL);
+  const oracle = new ethers.Contract(ORACLE_ADDRESS, ABI, provider);
+
+  const assetId = ASSET_IDS[symbol];
+  const [info, exists] = await oracle.getAssetInfo(assetId);
+
+  if (!exists) {
+    throw new Error(`Asset ${symbol} not supported`);
+  }
+
+  const humanPrice = Number(info.price) / 10 ** Number(-info.decimal);
+  const age = Math.floor(Date.now() / 1000) - Number(info.lastUpdateTime);
+
+  return {
+    symbol,
+    price: humanPrice.toFixed(6),
+    lastUpdated: `${age}s ago`,
+    raw: {
+      price: info.price.toString(),
+      decimal: info.decimal,
+      timestamp: info.lastUpdateTime.toString(),
+    },
+  };
+}
+
+// Example usage
+getPrice("USDT/USD").then(console.log).catch(console.error);
+```
+
+**Example output:**
+
+```json
+{
+  "symbol": "USDT/USD",
+  "price": "1.000124",
+  "lastUpdated": "412s ago",
+  "raw": {
+    "price": "1000124000000000000",
+    "decimal": -18,
+    "timestamp": "1748600822"
+  }
+}
+```
+
+---
+
+## Common Asset IDs
+
+Use these in any of the three methods above:
+
+| Asset | Asset ID |
+| --- | --- |
+| USDT/USD | `0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d` |
+| USDC/USD | `0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d` |
+| CNGN/USD | `0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a` |
+| BRZ/USD | `0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5` |
+| ETH/USD | `0x8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0` |
+| ZARP/USD | `0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8` |
+
+---
+
+## What's Happening Under the Hood
+
+Every call to `getAssetInfo` reads directly from an audited smart contract on-chain. There is no API server, no middleware, and no off-chain dependency in the read path. The price you get is exactly what was last pushed by IFÁ Labs' decentralized relayer network — verifiable by anyone on the blockchain.
+
+This also means **price reads cost zero gas.** View calls on EVM chains are free. The only gas cost in your integration is if you're writing price data into your own contract's storage.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Verify Price Integrity" icon="shield-check" href="/quickstart/verify-price-integrity">
+    Add staleness checks and deviation guards before going to production.
+  </Card>
+
+  <Card title="EVM Integration Guide" icon="code" href="/integration-guides/evm-smart-contracts/installation-and-setup">
+    Build a full production integration into your smart contracts.
+  </Card>
+</CardGroup>

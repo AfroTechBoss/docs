@@ -1,0 +1,214 @@
+---
+title: "How IFÁ Aggregates Prices"
+description: "A technical walkthrough of the IFÁ Labs price aggregation pipeline — from data collection through on-chain submission."
+---
+
+Every price feed in IFÁ Labs starts as raw data from multiple independent sources and ends as a single, verified value stored in an audited smart contract. Between those two points is a multi-stage aggregation pipeline designed specifically for stablecoin behavior — not repurposed from volatile asset logic.
+
+This page walks through every stage of that pipeline in detail.
+
+---
+
+## The Aggregation Pipeline
+
+```text
+Raw Source Data
+      │
+      ▼
+ Data Collection ──────────────────────────────────────────────
+ CEXs + DEXs + Forex Providers + Regional Exchanges            │
+      │                                                         │
+      ▼                                                         │
+ Normalization & Cleaning                                       │
+ Standardize format, remove incomplete data                     │
+      │                                                         │
+      ▼                                                         │
+ Outlier Detection & Removal                                    │
+ Statistical filtering tuned for stablecoin peg behavior       │
+      │                                                         │
+      ▼                                                         │
+ Consensus Calculation                                          │
+ Weighted median / weighted average                             │
+      │                                                         │
+      ▼                                                         │
+ Validation                                                     │
+ Peg bounds check + timestamp verification                      │
+      │                                                         │
+      ▼                                                         │
+ Relayer Signing                                                │
+ Decentralized relayers sign verified price                     │
+      │                                                         │
+      ▼                                                         │
+ On-Chain Submission                                            │
+ Price stored in audited EVM contract on Base                   │
+```
+
+---
+
+## Stage 1: Data Collection
+
+Prices are pulled from a diverse set of independent sources. No single source can dominate or override the final aggregated value.
+
+**Source categories:**
+
+| Source Type | Examples | Role |
+| --- | --- | --- |
+| Centralized Exchanges (CEXs) | Major global trading platforms | High-volume reference prices for global stablecoins |
+| Decentralized Exchanges (DEXs) | On-chain AMM pools | Transparent, verifiable on-chain pricing |
+| Forex Providers | Institutional FX data feeds | Accurate fiat-to-stable conversion rates |
+| Regional Exchanges | African, Latin American, Southeast Asian venues | Critical for local stablecoin accuracy |
+| Fiat On-Ramps | Local payment gateways | Real-world peg reflection for emerging market assets |
+
+**Why regional sources matter:**
+
+A global CEX may show cNGN trading at $0.000620 while the Nigerian naira market reflects $0.000608. The delta is small in absolute terms but material for protocols running liquidation logic. IFÁ Labs integrates local sources specifically to capture this ground truth — not an approximation of it.
+
+---
+
+## Stage 2: Normalization and Cleaning
+
+Raw prices arrive in different formats, denominated against different quote currencies, with varying precision. Before aggregation, every data point is:
+
+- **Converted to USD denomination** — all feeds are normalized to a common USD quote
+- **Scaled to a consistent precision** — 18 decimal places for all stablecoin feeds
+- **Timestamped and validated** — entries without valid timestamps or below minimum volume thresholds are discarded
+- **Deduplicated** — multiple data points from the same source within a single aggregation window are collapsed to the most recent
+
+---
+
+## Stage 3: Outlier Detection and Removal
+
+This is the stage most oracle networks handle poorly for stablecoins. General-purpose outlier logic is calibrated for volatile assets — a data point 3% from the median might be noise for BTC, but for a USD stablecoin it is a significant anomaly.
+
+IFÁ Labs uses stablecoin-specific outlier detection:
+
+**Absolute deviation filter:** Data points deviating beyond a tight absolute threshold from the preliminary median are flagged and excluded. The threshold is calibrated per asset based on historical peg behavior — tighter for USDT and USDC, slightly wider for emerging market stablecoins with natural micro-fluctuations.
+
+**Source reliability weighting:** Sources with a history of temporary inaccuracies — exchange outages, stale API responses, thin liquidity events — are assigned lower weights or excluded entirely for that aggregation round.
+
+**Flash event filtering:** Extremely short-lived price spikes — lasting less than a configured minimum duration — are filtered out regardless of magnitude. This prevents flash loan attacks or momentary liquidity events from affecting the aggregated price.
+
+```text
+Example: USDT/USD outlier filtering
+
+Raw source prices (normalized):
+  Source A:  1.000120
+  Source B:  1.000080
+  Source C:  0.998400  ← flagged: deviates > 0.15% from preliminary median
+  Source D:  1.000110
+  Source E:  1.000090
+
+After outlier removal:
+  Source A:  1.000120
+  Source B:  1.000080
+  Source D:  1.000110
+  Source E:  1.000090
+
+Preliminary median: 1.000100
+```
+
+---
+
+## Stage 4: Consensus Calculation
+
+The cleaned data set is reduced to a single price using a weighted consensus algorithm. IFÁ Labs uses two methods depending on asset characteristics:
+
+### Weighted Median
+
+The primary method for most stablecoin feeds. Sources are sorted by price, weighted by a combination of:
+
+- **Liquidity depth** — higher-volume sources contribute more to the final value
+- **Historical reliability** — sources with consistent, accurate data over time receive higher weights
+- **Geographic relevance** — for emerging market stablecoins, regional sources receive elevated weight to reflect local market reality
+
+The weighted median is selected rather than the weighted average because it is inherently resistant to manipulation. Even if several sources report a corrupted or manipulated price, the median remains anchored to the majority of honest data.
+
+### Weighted Average
+
+Used for assets with very high source agreement and deep liquidity — typically USDT and USDC during stable periods. When source prices are tightly clustered, an average produces a marginally more precise result than a median.
+
+The algorithm selects the appropriate method per asset per aggregation round based on the spread of the cleaned data set.
+
+```text
+Example: USDT/USD consensus calculation (weighted median)
+
+Cleaned sources with weights:
+  Source A:  1.000120  (weight: 0.35)
+  Source B:  1.000080  (weight: 0.25)
+  Source D:  1.000110  (weight: 0.25)
+  Source E:  1.000090  (weight: 0.15)
+
+Sorted by price:
+  Source B:  1.000080  (cumulative weight: 0.25)
+  Source E:  1.000090  (cumulative weight: 0.40)
+  Source D:  1.000110  (cumulative weight: 0.65) ← median crosses 0.50 here
+  Source A:  1.000120  (cumulative weight: 1.00)
+
+Weighted median: 1.000110
+```
+
+---
+
+## Stage 5: Validation
+
+Before the aggregated price proceeds to signing and submission, it passes a final validation gate:
+
+**Peg bounds check:** The aggregated price must fall within a configured range of the expected peg. For USD stablecoins, this is typically ±2% of \$1.00. A price outside this range triggers an alert and prevents submission until the anomaly is investigated — it may represent a genuine depeg event requiring human review.
+
+**Timestamp verification:** The aggregated price must be derived from source data collected within the current aggregation window. Stale source data — even if accurate — is rejected to ensure the on-chain value reflects current market conditions.
+
+**Minimum source threshold:** A minimum number of independent sources must contribute to the final aggregated price. If too many sources are unavailable or filtered out, the submission is withheld rather than proceeding with insufficient data.
+
+---
+
+## Stage 6: Relayer Signing and On-Chain Submission
+
+Once the aggregated price passes validation, it is submitted on-chain by the decentralized relayer network.
+
+**How relayers work:**
+
+1. Multiple independent relayers receive the validated aggregated price
+2. Each relayer independently verifies the price against their own data
+3. Relayers sign the price update and submit to the oracle contract
+4. The contract records the price, decimal, and timestamp
+
+**Trustless design:** No single relayer controls the submission. The contract accepts updates from the authorized relayer set, and all submissions are recorded on-chain with relayer attribution — creating a full audit trail.
+
+**Update triggers:** A relayer submits a new price when either condition is met:
+
+- The new aggregated price deviates from the current on-chain value by more than the configured threshold — typically 0.1–0.5% for stablecoins
+- The maximum time interval since the last update has elapsed — the heartbeat trigger that ensures freshness even during stable periods
+
+<Note>
+  The deviation threshold and heartbeat interval are configured per asset. Tighter thresholds and shorter heartbeats are used for assets where even small deviations have significant protocol consequences.
+</Note>
+
+---
+
+## Why This Architecture Handles Stablecoins Better
+
+The design choices above are not incidental — each one addresses a specific failure mode that general-purpose oracles encounter with stablecoin pricing:
+
+| Failure Mode | How IFÁ Labs Addresses It |
+| --- | --- |
+| Flash loan price manipulation | Flash event filtering removes sub-threshold duration spikes |
+| Single source failure or outage | Multi-source aggregation with minimum source threshold |
+| Regional market divergence | Weighted regional sources for emerging market assets |
+| Stale source data contaminating the feed | Per-round timestamp validation on all source data |
+| Outlier manipulation from a single corrupt source | Weighted median resists outlier influence by design |
+| Over-updating wastes gas | Deviation \+ heartbeat hybrid minimizes unnecessary submissions |
+| Under-updating misses real depeg events | Tight deviation thresholds catch small but meaningful moves |
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Data Sources & Verification" icon="database" href="/core-concepts/data-sources-and-verification">
+    Deep dive into source selection criteria and verification layers.
+  </Card>
+
+  <Card title="Update Triggers" icon="clock" href="/core-concepts/update-triggers-deviation-time">
+    Understand exactly when and why price updates are pushed on-chain.
+  </Card>
+</CardGroup>

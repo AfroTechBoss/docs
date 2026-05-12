@@ -1,0 +1,241 @@
+---
+title: "GitHub & Bug Reports"
+description: "How to report bugs, request features, contribute code, and work with the IFÁ Labs open-source repositories."
+---
+
+IFÁ Labs develops in the open. The oracle contracts, interface package, and supporting tools are publicly available on GitHub. This page covers how to report bugs effectively, how to request features, and how to contribute code or documentation back to the project.
+
+---
+
+## Repositories
+
+| Repository | Description | Link |
+| --- | --- | --- |
+| **oracle\_contract** | Oracle smart contracts, deployment scripts, and audit reports | [github.com/IFA-Labs/oracle\_contract](https://github.com/IFA-Labs/oracle_contract) |
+| **IfaPriceFeed-interface** | Official Solidity interface and ABI for consuming the oracle | [github.com/IFA-Labs/IfaPriceFeed-interface](https://github.com/IFA-Labs/IfaPriceFeed-interface) |
+
+---
+
+## Reporting Bugs
+
+### Before Opening an Issue
+
+Work through the following before filing a bug report — most issues are resolved without needing a GitHub issue:
+
+1. Check [Common Integration Errors](/troubleshooting/common-integration-errors) for your error type
+2. Check [Error Code Reference](/troubleshooting/error-code-reference) for the specific revert
+3. Check [Price Appears Stale](/troubleshooting/price-appears-stale) for staleness-related issues
+4. Search existing issues — your bug may already be reported or resolved
+
+### Opening a Bug Report
+
+Go to [github.com/IFA-Labs/oracle\_contract/issues/new](https://github.com/IFA-Labs/oracle_contract/issues/new) and use the Bug Report template. Include:
+
+**Required:**
+
+```text
+- Network:          Base Mainnet / Base Sepolia / AssetChain Testnet
+- Oracle address:   0x...
+- Asset ID:         0x... (or symbol — USDT/USD, CNGN/USD, etc.)
+- Error:            Exact revert reason or error message
+- Steps to reproduce: Minimal reproduction steps or code snippet
+- Expected result:  What you expected to happen
+- Actual result:    What actually happened
+```
+
+**Include if applicable:**
+
+```text
+- Transaction hash:  0x... (for on-chain issues)
+- Block number:      For issues tied to a specific block
+- Tool version:      ethers.js v6.x, Foundry v0.x, etc.
+- ifa-mcp version:   For MCP server issues (ifa-mcp --version)
+```
+
+**Minimal reproduction example:**
+
+A minimal code snippet that demonstrates the issue is the single most valuable thing you can include. Strip out everything unrelated to the bug — the shorter, the better.
+
+```solidity
+// Example minimal reproduction — staleness check failing unexpectedly
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "ifapricefeed-interface/IIfaPriceFeed.sol";
+
+contract BugRepro {
+    IIfaPriceFeed constant ORACLE =
+        IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC);
+
+    bytes32 constant CNGN_ID =
+        0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a;
+
+    // This reverts with "IFA: price feed is stale" even though
+    // the feed age is only 4,200 seconds — below my MAX_PRICE_AGE of 7200
+    function getPrice() external view returns (int256) {
+        (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+            ORACLE.getAssetInfo(CNGN_ID);
+
+        require(exists, "Not supported");
+        require(block.timestamp - info.lastUpdateTime <= 7200, "IFA: price feed is stale");
+
+        return info.price;
+    }
+}
+```
+
+---
+
+## Requesting Features
+
+Feature requests are welcome — particularly for:
+
+- New stablecoin feed support for emerging market assets
+- New chains or network deployments
+- Additional derived pair functions or batch query patterns
+- Developer tooling improvements
+- MCP server tool additions
+
+Open a feature request at [github.com/IFA-Labs/oracle\_contract/issues/new](https://github.com/IFA-Labs/oracle_contract/issues/new) using the Feature Request template. Include:
+
+- A clear description of what you want and why
+- The use case or protocol it would enable
+- Any relevant technical details or proposed implementation approach
+- Whether this is blocking a specific integration
+
+---
+
+## Contributing Code
+
+IFÁ Labs welcomes pull requests for bug fixes, gas optimizations, test coverage improvements, and documentation enhancements.
+
+### Contribution Workflow
+
+<Steps>
+  <Step title="Fork the repository">
+    Fork [oracle\_contract](https://github.com/IFA-Labs/oracle_contract) or [IfaPriceFeed-interface](https://github.com/IFA-Labs/IfaPriceFeed-interface) to your GitHub account.
+  </Step>
+  <Step title="Create a branch">
+    Use a descriptive branch name that reflects the change:
+
+    ```bash
+        git checkout -b fix/staleness-check-boundary
+        git checkout -b feat/batch-price-validation
+        git checkout -b docs/update-asset-id-examples
+    ```
+  </Step>
+  <Step title="Make your changes">
+    Keep changes focused — one fix or feature per pull request. Mixed concerns make review slower and harder.
+  </Step>
+  <Step title="Run tests">
+    ```bash
+        # Run the full test suite
+        forge test -vvv
+    
+        # Run with gas reporting
+        forge test --gas-report
+    
+        # Run a specific test
+        forge test --match-test test_getAssetInfo_returnsCorrectPrice -vvv
+    ```
+
+    All existing tests must pass. New functionality should include new tests.
+  </Step>
+  <Step title="Open a pull request">
+    Open a PR against the `main` branch. Include:
+
+    - A clear title describing what the PR does
+    - A description of why the change is needed
+    - Links to any related issues
+    - Test results or gas comparison if relevant
+
+    PRs without a description or failing tests will not be reviewed until these are addressed.
+  </Step>
+</Steps>
+
+---
+
+## Contribution Areas
+
+| Area | What's Needed | Difficulty |
+| --- | --- | --- |
+| Bug fixes | Reproduce, fix, and test issues from the issue tracker | Varies |
+| Test coverage | Additional edge case tests — staleness boundaries, batch limits, derived pair edge cases | Medium |
+| Gas optimization | Identify and benchmark gas savings in read paths | Medium |
+| Documentation | Fix errors, improve examples, add missing coverage | Low |
+| New examples | Integration examples for additional frameworks or use cases | Low–Medium |
+| MCP server tools | Additional tool implementations for the MCP server | Medium |
+
+---
+
+## Security Vulnerabilities
+
+**Do not open a public GitHub issue for security vulnerabilities.**
+
+Public disclosure before a fix is deployed puts every protocol building on IFÁ Labs at risk. Use the responsible disclosure process:
+
+- **Email:** [security@ifalabs.com](mailto:security@ifalabs.com)
+- **Full policy:** [Report a Vulnerability](/security-and-audits/report-a-vulnerability)
+
+---
+
+## Repository Structure
+
+Understanding the repository layout helps contributors navigate the codebase:
+
+```text
+oracle_contract/
+├── src/
+│   ├── IfaPriceFeed.sol          — Primary oracle contract
+│   └── interfaces/
+│       └── IIfaPriceFeed.sol     — Contract interface
+├── test/
+│   ├── IfaPriceFeed.t.sol        — Core contract tests
+│   └── integration/              — Integration test scenarios
+├── script/
+│   ├── Deploy.s.sol              — Deployment scripts
+│   └── Verify.s.sol              — Post-deployment verification
+├── audits/
+│   └── adforensics-2025-07.pdf   — A&D Forensics audit report
+├── foundry.toml                  — Foundry configuration
+└── README.md
+```
+
+```text
+IfaPriceFeed-interface/
+├── src/
+│   └── IIfaPriceFeed.sol         — Solidity interface
+├── abi/
+│   └── IIfaPriceFeed.json        — ABI for off-chain consumption
+└── package.json                  — npm package configuration
+```
+
+---
+
+## Staying Connected
+
+Watch the repositories to receive notifications for new issues, releases, and pull requests:
+
+1. Go to [github.com/IFA-Labs/oracle\_contract](https://github.com/IFA-Labs/oracle_contract)
+2. Click **Watch** → **All Activity**
+3. GitHub will notify you of new issues, comments, and releases
+
+Star the repository to show support and make it easier to find:
+
+<Card title="⭐ Star oracle_contract on GitHub" icon="star" href="https://github.com/IFA-Labs/oracle_contract">
+  Stars help IFÁ Labs surface in GitHub search and signal ecosystem trust to protocols evaluating integration.
+</Card>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="FAQ" icon="circle-question" href="/support-and-community/faq">
+    Answers to the most frequently asked questions about IFÁ Labs.
+  </Card>
+
+  <Card title="Report a Vulnerability" icon="shield" href="/security-and-audits/report-a-vulnerability">
+    Responsible disclosure policy for security findings.
+  </Card>
+</CardGroup>

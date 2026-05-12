@@ -1,0 +1,247 @@
+---
+title: "Installation & Setup"
+description: "Add IFÁ Labs to your EVM smart contract project — interface installation, contract addresses, and initial configuration."
+---
+
+This page covers everything you need to get IFÁ Labs wired into your smart contract project. By the end, you'll have the interface installed, the correct contract address configured for your target network, and a working oracle reference ready to use.
+
+---
+
+## Install the Interface Package
+
+The official IFÁ Labs interface package gives you the complete `IIfaPriceFeed` Solidity interface, all struct and event definitions, and the latest ABI — fully typed and ready to import.
+
+<Tabs>
+  <Tab title="npm">
+    ```bash
+        npm install ifapricefeed-interface
+    ```
+  </Tab>
+  <Tab title="yarn">
+    ```bash
+        yarn add ifapricefeed-interface
+    ```
+  </Tab>
+  <Tab title="Foundry">
+    ```bash
+        forge install IFA-Labs/IfaPriceFeed-interface
+    ```
+
+    Then add the remapping to your `remappings.txt`:
+
+    ```text
+        ifapricefeed-interface/=lib/IfaPriceFeed-interface/src/
+    ```
+  </Tab>
+</Tabs>
+
+Once installed, import the interface in your Solidity contracts:
+
+```solidity
+import "ifapricefeed-interface/IIfaPriceFeed.sol";
+```
+
+If you're using **Remix IDE**, you can copy the interface directly from the [GitHub repository](https://github.com/IFA-Labs/IfaPriceFeed-interface) and paste it into a separate file in your project.
+
+---
+
+## Contract Addresses
+
+Use the address that matches your target network. All deployments expose an identical interface — no code changes required when moving between networks.
+
+| Network | Address |
+| --- | --- |
+| **Base Mainnet** | `0xA9F17344689C2c2328F94464998db1d3e35B80dC` |
+| **Base Sepolia** | `0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b` |
+| **AssetChain Testnet** | `0xBAc31e568883774A632275F9c8E7A5Bd117000F7` |
+
+<Warning>
+  Always verify contract addresses against the [Contract Addresses](/onchain-reference/smart-contracts/contract-addresses) reference page and the verified source on Basescan before deploying to production. Never hardcode an address from an unofficial source.
+</Warning>
+
+---
+
+## Configure Your Contract
+
+Declare the oracle as an immutable constant. This is the most gas-efficient pattern and prevents the address from being changed after deployment.
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "ifapricefeed-interface/IIfaPriceFeed.sol";
+
+contract MyProtocol {
+    // Oracle reference — set once at compile time
+    IIfaPriceFeed public constant ORACLE =
+        IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC); // Base Mainnet
+
+    // Asset IDs — declare as constants to save gas on every lookup
+    bytes32 public constant USDT_ASSET_ID =
+        0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d;
+
+    bytes32 public constant USDC_ASSET_ID =
+        0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d;
+
+    bytes32 public constant CNGN_ASSET_ID =
+        0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a;
+
+    bytes32 public constant ZARP_ASSET_ID =
+        0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8;
+
+    bytes32 public constant BRZ_ASSET_ID =
+        0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5;
+}
+```
+
+<Tip>
+  Declaring asset IDs as `bytes32 constant` eliminates runtime `keccak256` computation on every call. For a contract that reads prices frequently, this adds up to meaningful gas savings over time.
+</Tip>
+
+---
+
+## Interface Overview
+
+Here's what the `IIfaPriceFeed` interface exposes:
+
+```solidity
+interface IIfaPriceFeed {
+
+    struct PriceFeed {
+        int256  price;           // Scaled price value
+        int8    decimal;         // Negative exponent — e.g. -18 means divide by 1e18
+        uint256 lastUpdateTime;  // Unix timestamp of the last on-chain update
+    }
+
+    enum PairDirection {
+        Forward,   // asset0 priced in terms of asset1
+        Backward   // asset1 priced in terms of asset0
+    }
+
+    // --- Single asset ---
+    function getAssetInfo(bytes32 assetId)
+        external
+        view
+        returns (PriceFeed memory assetInfo, bool exists);
+
+    // --- Batch assets ---
+    function getAssetsInfo(bytes32[] calldata assetIds)
+        external
+        view
+        returns (PriceFeed[] memory infos, bool[] memory exists);
+
+    // --- Derived pairs ---
+    function getPairbyId(
+        bytes32 assetIndex0,
+        bytes32 assetIndex1,
+        PairDirection direction
+    ) external view returns (DerivedPair memory);
+
+    function getPairsbyIdForward(
+        bytes32[] calldata assetIndexes0,
+        bytes32[] calldata assetIndexes1
+    ) external view returns (DerivedPair[] memory);
+
+    function getPairsbyIdBackward(
+        bytes32[] calldata assetIndexes0,
+        bytes32[] calldata assetIndexes1
+    ) external view returns (DerivedPair[] memory);
+
+    function getPairsbyId(
+        bytes32[] calldata assetIndexes0,
+        bytes32[] calldata assetIndexes1,
+        PairDirection[] calldata directions
+    ) external view returns (DerivedPair[] memory);
+}
+```
+
+All functions are `view` — read-only, no gas cost when called externally, and safe to call from any context without side effects.
+
+---
+
+## Environment-Based Address Management
+
+If you're working across multiple networks, manage addresses cleanly rather than manually swapping constants:
+
+<Tabs>
+  <Tab title="Hardhat">
+    ```javascript
+        // hardhat.config.js
+        const ORACLE_ADDRESSES = {
+          "base-mainnet": "0xA9F17344689C2c2328F94464998db1d3e35B80dC",
+          "base-sepolia": "0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b",
+          "assetchain-testnet": "0xBAc31e568883774A632275F9c8E7A5Bd117000F7",
+        };
+    
+        module.exports = {
+          networks: {
+            "base-mainnet": {
+              url: "https://mainnet.base.org",
+              oracleAddress: ORACLE_ADDRESSES["base-mainnet"],
+            },
+            "base-sepolia": {
+              url: "https://sepolia.base.org",
+              oracleAddress: ORACLE_ADDRESSES["base-sepolia"],
+            },
+          },
+        };
+    ```
+  </Tab>
+  <Tab title="Foundry">
+    ```toml
+        # foundry.toml
+        [profile.default]
+        src = "src"
+        out = "out"
+        libs = ["lib"]
+    
+        [profile.mainnet]
+        # Set via environment variable at deploy time
+        # ORACLE_ADDRESS=0xA9F17344689C2c2328F94464998db1d3e35B80dC forge script ...
+    
+        [profile.testnet]
+        # ORACLE_ADDRESS=0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b forge script ...
+    ```
+
+    Then in your deploy script:
+
+    ```solidity
+        address oracle = vm.envAddress("ORACLE_ADDRESS");
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Checklist Before Moving On
+
+Before proceeding to reading prices, confirm the following:
+
+<Steps>
+  <Step title="Interface installed">
+    `ifapricefeed-interface` is in your `package.json` dependencies or Foundry libs.
+  </Step>
+  <Step title="Correct network address">
+    You're using the right contract address for your target network — mainnet or testnet.
+  </Step>
+  <Step title="Asset IDs declared as constants">
+    All asset IDs you need are declared as `bytes32 constant` in your contract.
+  </Step>
+  <Step title="Import confirmed">
+    `import "ifapricefeed-interface/IIfaPriceFeed.sol"` resolves without errors in your compiler.
+  </Step>
+</Steps>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Read Latest Price" icon="circle-dot" href="/integration-guides/evm-smart-contracts/read-latest-price">
+    Start reading live stablecoin prices from your contract.
+  </Card>
+
+  <Card title="Contract Addresses" icon="file-contract" href="/onchain-reference/smart-contracts/contract-addresses">
+    Full reference for all deployed addresses across every supported network.
+  </Card>
+</CardGroup>
