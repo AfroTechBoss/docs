@@ -1,13 +1,156 @@
 ---
 title: "Changelog"
-description: "A record of every significant update to IFÁ Labs — new deployments, new assets, contract changes, documentation updates, and breaking changes."
+description: "A record of every significant update to IFÁ Labs — new deployments, new assets, contract changes, MCP server releases, and breaking changes."
 ---
+
+This page tracks every significant change to the IFÁ Labs oracle network — contract deployments, new asset feeds, configuration changes, security fixes, MCP server releases, and documentation updates. Entries are listed in reverse chronological order.
+
+Breaking changes are marked **\[BREAKING\]**. Security fixes are marked **\[SECURITY\]**. New deployments are marked **\[DEPLOYMENT\]**. New assets are marked **\[ASSET\]**. New tooling is marked **\[TOOLING\]**.
+
+---
+
+## 2026
+
+### May 2026
 
 **May 2026**
 
-**\[DEPLOYMENT\]** `@ifalabs/mcp-server` v1.0.0 published to npm.
+**\[TOOLING\]** `@ifalabs/mcp-server` v1.0.0 published to npm.
 
-- 7 tools: `get_asset_price`, `get_multiple_prices`, `get_derived_pair`, `get_supported_assets`, `get_asset_id`, `check_price_freshness`, `get_network_info`
-- Supports: Claude Desktop, Cursor, Windsurf, TRAE, Zed, Continue, LangChain, CrewAI, AutoGen
 - Install: `npm install -g @ifalabs/mcp-server`
+- Binary: `ifa-mcp`
+- 7 tools exposed: `get_asset_price`, `get_multiple_prices`, `get_derived_pair`, `get_supported_assets`, `get_asset_id`, `check_price_freshness`, `get_network_info`
+- Supported clients: Claude Desktop, Cursor, Windsurf, TRAE, Zed, Continue, LangChain, CrewAI, AutoGen
+- Transport: stdio (SSE planned)
 - Documentation: [MCP Server](/what-is-the-ifa-labs-mcp-server)
+
+---
+
+## 2026
+
+### January 2026
+
+**January 7, 2026**
+
+**\[SECURITY\]** All findings from the A&D Forensics security audit confirmed resolved.
+
+- Finding 1 (Inefficient stale check) — resolved
+- Finding 2 (Self-pairing allowed) — resolved
+- Finding 3 (Zero-price validation missing) — resolved
+- Finding 4 (Silent reverts) — resolved
+- Finding 5 (Struct indexing) — resolved
+- Finding 6 (Incorrect error reporting) — resolved
+- Finding 7 (Unnecessary comments and inefficient logic) — resolved
+
+Full audit summary: [AdForensics Audit Summary](/adforensics-audit-summary)
+
+---
+
+## 2025
+
+### July 2025
+
+**July 31, 2025**
+
+**\[SECURITY\]** A&D Forensics security audit of oracle contracts completed.
+
+- Audit scope: full oracle contract codebase at commit `17f7ffc31a9818f35977ad042986cb72820d513b`
+- Methodology: manual code review, Mythril static analysis, functional testing
+- Result: no critical or high severity findings — 5 low, 2 informational
+- Status at delivery: all findings identified, remediation in progress
+
+---
+
+### June 2025
+
+**June 25, 2025**
+
+**\[ASSET\]** ZARP/USD feed added — South African rand stablecoin.
+
+- Asset ID: `0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8`
+- Deviation threshold: 0.3%
+- Heartbeat: 2 hours
+- Available on: Base Mainnet, Base Sepolia, AssetChain Testnet
+
+**June 24, 2025**
+
+IFÁ Labs demoed at Base ecosystem event. Deck and recording available via [@ifalabs](https://x.com/ifalabs).
+
+---
+
+### March 2025
+
+**March 2025**
+
+**\[DEPLOYMENT\]** IFÁ Labs joined [@ifalabs](https://x.com/ifalabs) on X.
+
+---
+
+### Initial Deployments
+
+**\[DEPLOYMENT\]** Oracle contracts deployed to Base Mainnet.
+
+- Contract: `0xA9F17344689C2c2328F94464998db1d3e35B80dC`
+- Initial feeds: USDT/USD, USDC/USD, CNGN/USD, BRZ/USD, ETH/USD
+
+**\[DEPLOYMENT\]** Oracle contracts deployed to Base Sepolia testnet.
+
+- Contract: `0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b`
+- Identical feeds and interface to mainnet
+
+**\[DEPLOYMENT\]** Oracle contracts deployed to AssetChain Testnet.
+
+- Contract: `0xBAc31e568883774A632275F9c8E7A5Bd117000F7`
+- RWA-focused ecosystem integration
+
+---
+
+## Upcoming
+
+The following changes are planned and will be documented here when released:
+
+| Change | Type | Target |
+| --- | --- | --- |
+| AssetChain Mainnet deployment | \[DEPLOYMENT\] | TBD |
+| Solana native program | \[DEPLOYMENT\] | TBD |
+| Optimism deployment | \[DEPLOYMENT\] | TBD |
+| Arbitrum deployment | \[DEPLOYMENT\] | TBD |
+| Cross-chain messaging via LayerZero or Wormhole | Feature | H2 2026 |
+| Global view contracts | Feature | H2 2026 |
+| Formal bug bounty program launch | Program | TBD |
+| Relayer slashing mechanism | Feature | TBD |
+| SSE transport for MCP server | \[TOOLING\] | TBD |
+
+---
+
+## Staying Updated
+
+The fastest ways to stay informed of IFÁ Labs changes:
+
+<CardGroup cols={3}>
+  <Card title="X / Twitter" icon="x-twitter" href="https://x.com/ifalabs">
+    @ifalabs — deployment announcements, new assets, ecosystem updates
+  </Card>
+
+  <Card title="Telegram" icon="message" href="https://t.me/ifalabs">
+    t.me/ifalabs — real-time updates and incident announcements
+  </Card>
+
+  <Card title="GitHub" icon="github" href="https://github.com/IFA-Labs/oracle_contract">
+    Watch the repository for contract changes and releases
+  </Card>
+</CardGroup>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Supported Assets" icon="coins" href="/supported-assets">
+    Current feed list with asset IDs and configuration.
+  </Card>
+
+  <Card title="Get Help" icon="message" href="/get-help">
+    Contact the IFÁ Labs team directly.
+  </Card>
+</CardGroup>
