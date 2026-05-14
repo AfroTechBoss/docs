@@ -1,0 +1,196 @@
+---
+title: "Contract Addresses"
+description: "Verified deployment addresses for the IFÁ Labs oracle contract across all supported networks — with block explorer links and verification guidance."
+---
+
+IFÁ Labs deploys an identical oracle contract across every supported network. The same interface, the same asset IDs, and the same function signatures work on every deployment. The only thing that changes between networks is the contract address.
+
+This page is the authoritative reference for all deployed addresses. Verify every address against this page and the on-chain source before using it in production.
+
+---
+
+## Live Deployments
+
+| Network | Type | Contract Address | Block Explorer |
+| --- | --- | --- | --- |
+| **Base Mainnet** | Production | `0xA9F17344689C2c2328F94464998db1d3e35B80dC` | [View on Basescan](https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC) |
+| **Base Sepolia** | Testnet | `0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b` | [View on Basescan Sepolia](https://sepolia.basescan.org/address/0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b) |
+| **AssetChain Testnet** | Testnet | `0xBAc31e568883774A632275F9c8E7A5Bd117000F7` | [View on AssetChain Explorer](https://scan-testnet.assetchain.org/address/0xBAc31e568883774A632275F9c8E7A5Bd117000F7) |
+
+<Warning>
+  Always verify contract addresses on the official block explorer before deploying to production. Never use an address sourced from a third party, a Discord message, or an unofficial repository. This page and the verified on-chain source are the only authoritative references.
+</Warning>
+
+---
+
+## Read Contract Links
+
+Access the oracle's read functions directly from the block explorer without writing any code:
+
+| Network | Read Contract Link |
+| --- | --- |
+| **Base Mainnet** | [basescan.org/.../readContract](https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC#readContract) |
+| **Base Sepolia** | [sepolia.basescan.org/.../readContract](https://sepolia.basescan.org/address/0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b#readContract) |
+| **AssetChain Testnet** | [scan-testnet.assetchain.org/.../readContract](https://scan-testnet.assetchain.org/address/0xBAc31e568883774A632275F9c8E7A5Bd117000F7#readContract) |
+
+---
+
+## Upcoming Deployments
+
+| Network | Status | Target | Notes |
+| --- | --- | --- | --- |
+| **AssetChain Mainnet** | Planned | TBD | Full production deployment for RWA-focused protocols |
+| **Solana** | Planned | TBD | Native Solana program — different interface from EVM contracts |
+| **Optimism** | Planned | TBD | Additional EVM L2 |
+| **Arbitrum** | Planned | TBD | Additional EVM L2 |
+| **Polygon zkEVM** | Planned | TBD | Additional EVM L2 |
+
+<Note>
+  Contract addresses for upcoming deployments will be added to this page on launch day. Follow [@ifalabs](https://x.com/ifalabs) or join the [Telegram](https://t.me/ifalabs) for deployment announcements.
+</Note>
+
+---
+
+## Using Addresses in Your Contracts
+
+### Constant Declaration (Recommended)
+
+Declare the oracle address as a `constant` in your contract. This is the most gas-efficient pattern and prevents the address from being modified after deployment.
+
+```solidity
+// Base Mainnet
+IIfaPriceFeed public constant ORACLE =
+    IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC);
+```
+
+---
+
+### Immutable Declaration (For Multi-Network Deployments)
+
+If your deployment scripts target multiple networks and need to set the address at deploy time rather than compile time, use `immutable`:
+
+```solidity
+IIfaPriceFeed public immutable ORACLE;
+
+constructor(address oracleAddress) {
+    require(oracleAddress != address(0), "Invalid oracle address");
+    ORACLE = IIfaPriceFeed(oracleAddress);
+}
+```
+
+Then pass the correct address per network in your deploy script:
+
+<Tabs>
+  <Tab title="Foundry">
+    ```solidity
+        // script/Deploy.s.sol
+        contract DeployScript is Script {
+            function run() external {
+                address oracle = vm.envAddress("ORACLE_ADDRESS");
+                
+                vm.startBroadcast();
+                new MyProtocol(oracle);
+                vm.stopBroadcast();
+            }
+        }
+    ```
+
+    ```bash
+        # Base Mainnet
+        ORACLE_ADDRESS=0xA9F17344689C2c2328F94464998db1d3e35B80dC \
+        forge script script/Deploy.s.sol --rpc-url base-mainnet --broadcast
+    
+        # Base Sepolia
+        ORACLE_ADDRESS=0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b \
+        forge script script/Deploy.s.sol --rpc-url base-sepolia --broadcast
+    ```
+  </Tab>
+  <Tab title="Hardhat">
+    ```javascript
+        // scripts/deploy.js
+        const ORACLE_ADDRESSES = {
+            "base-mainnet": "0xA9F17344689C2c2328F94464998db1d3e35B80dC",
+            "base-sepolia": "0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b",
+            "assetchain-testnet": "0xBAc31e568883774A632275F9c8E7A5Bd117000F7",
+        };
+    
+        async function main() {
+            const network  = hre.network.name;
+            const oracle   = ORACLE_ADDRESSES[network];
+    
+            if (!oracle) throw new Error(`No oracle address for network: ${network}`);
+    
+            const MyProtocol = await ethers.getContractFactory("MyProtocol");
+            const contract   = await MyProtocol.deploy(oracle);
+    
+            await contract.waitForDeployment();
+            console.log(`Deployed to: ${await contract.getAddress()}`);
+            console.log(`Oracle:      ${oracle}`);
+        }
+    
+        main().catch(console.error);
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Verifying the Contract On-Chain
+
+Before using any address in production, verify it on the block explorer:
+
+<Steps>
+  <Step title="Open the contract on Basescan">
+    Navigate to the address on [Basescan](https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC). The contract should show a green checkmark indicating the source code is verified.
+  </Step>
+  <Step title="Confirm the contract name">
+    Under the **Contract** tab, confirm the contract name matches `IfaPriceFeed` or the expected IFÁ Labs contract name. A mismatch means you have the wrong address.
+  </Step>
+  <Step title="Cross-reference the ABI">
+    The verified ABI on Basescan should include `getAssetInfo`, `getAssetsInfo`, and the derived pair functions. If these functions are absent, the address is wrong.
+  </Step>
+  <Step title="Call getAssetInfo">
+    Under **Read Contract**, call `getAssetInfo` with a known asset ID — for example, USDT/USD: `0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d`. A valid response with `exists = true` and a reasonable price confirms the contract is live and correctly addressed.
+  </Step>
+</Steps>
+
+---
+
+## Network Configuration Reference
+
+Full network details for integrating IFÁ Labs into your development environment:
+
+| Parameter | Base Mainnet | Base Sepolia | AssetChain Testnet |
+| --- | --- | --- | --- |
+| **Chain ID** | 8453 | 84532 | 42421 |
+| **RPC URL** | `https://mainnet.base.org` | `https://sepolia.base.org` | `https://enugu-rpc.assetchain.org` |
+| **Currency** | ETH | ETH (test) | Test Token |
+| **Block Explorer** | basescan.org | sepolia.basescan.org | scan-testnet.assetchain.org |
+| **Oracle Address** | `0xA9F17344689C2c2328F94464998db1d3e35B80dC` | `0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b` | `0xBAc31e568883774A632275F9c8E7A5Bd117000F7` |
+| **Faucet** | N/A | [base.org/faucet](https://www.base.org/faucet) | N/A |
+
+---
+
+## Reporting an Address Discrepancy
+
+If you encounter an address that claims to be an IFÁ Labs oracle but is not listed on this page, do not use it and report it immediately:
+
+- **Email:** [support@ifalabs.com](mailto:support@ifalabs.com)
+- **Telegram:** [t.me/ifalabs](https://t.me/ifalabs)
+- **GitHub:** [IFA-Labs/oracle\_contract/issues](https://github.com/IFA-Labs/oracle_contract/issues)
+
+Include the suspicious address, the network it was found on, and where you encountered it. Address impersonation is a common attack vector in DeFi — reporting suspicious addresses quickly protects the broader ecosystem.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Function Reference" icon="code" href="/function-reference">
+    Complete API reference for all oracle contract functions and return types.
+  </Card>
+
+  <Card title="ABI Download" icon="download" href="/abi-download">
+    Get the official ABI for use in your development tools and scripts.
+  </Card>
+</CardGroup>

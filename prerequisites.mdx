@@ -1,0 +1,110 @@
+---
+title: "Prerequisites"
+description: "Everything you need before integrating IFÁ Labs price feeds — wallets, testnet ETH, and development tooling."
+---
+
+Before you start integrating IFÁ Labs price feeds, you need three things: a compatible wallet, testnet ETH for Base Sepolia, and at least one development tool. This page walks through all of them.
+
+If you're already set up for EVM development on Base, you can skip straight to [Get Your First Price](/get-your-first-price).
+
+## 1. Wallet
+
+You need an Ethereum-compatible wallet to sign transactions and interact with Base.
+
+**Recommended: MetaMask**
+
+<Steps>
+  <Step title="Install MetaMask">
+    Download the browser extension or mobile app from [metamask.io](https://metamask.io). Use the official site — do not install from third-party sources.
+  </Step>
+  <Step title="Create or import a wallet">
+    Follow the setup flow. Store your seed phrase offline and never share it.
+  </Step>
+  <Step title="Add Base networks">
+    The easiest way is via [ChainList.org](https://chainlist.org) — search "Base" and click **Add to MetaMask**.
+
+    Or configure manually:
+
+    | Field | Base Mainnet | Base Sepolia |
+    | --- | --- | --- |
+    | Network Name | Base | Base Sepolia |
+    | RPC URL | `https://mainnet.base.org` | `https://sepolia.base.org` |
+    | Chain ID | `8453` | `84532` |
+    | Currency | ETH | ETH |
+    | Explorer | `https://basescan.org` | `https://sepolia.basescan.org` |
+  </Step>
+</Steps>
+
+**Alternatives:** Coinbase Wallet, Rainbow, or any WalletConnect-compatible wallet.
+
+## 2. Testnet ETH
+
+All development and testing should happen on **Base Sepolia** before touching mainnet. You'll need testnet ETH — it has no real value and is free to claim.
+
+**Official Base Sepolia Faucet**
+
+Visit [base.org/faucet](https://www.base.org/faucet), connect your wallet, and request tokens. Daily limits apply.
+
+**Alternative Faucets**
+
+| Faucet | Notes |
+| --- | --- |
+| [Alchemy Base Faucet](https://www.alchemy.com/faucets/base-sepolia) | Requires free Alchemy account |
+| [QuickNode Faucet](https://faucet.quicknode.com/base/sepolia) | No account required |
+| [Infura Faucet](https://www.infura.io/faucet/sepolia) | Requires free Infura account |
+
+<Note>
+  Mainnet interactions require real ETH on Base. IFÁ Labs price reads are view calls — they cost no gas. You only need ETH if you're deploying your own contracts that consume the feeds.
+</Note>
+
+## 3. Development Tools
+
+Pick the tooling that fits your workflow. You don't need all of them — one is enough to get started.
+
+| Tool | Best For | Setup |  |
+| --- | --- | --- | --- |
+| **Remix IDE** | Quick prototyping, no local setup | Visit [remix.ethereum.org](https://remix.ethereum.org) — runs in the browser |  |
+| **Foundry** | Fast testing, Rust-based, production workflows | \`curl -L [https://foundry.paradigm.xyz](https://foundry.paradigm.xyz) | bash\` |
+| **Hardhat** | JavaScript/TypeScript projects | `npm init -y && npm install --save-dev hardhat` |  |
+| **Ethers.js** | Frontend integrations and scripts | `npm install ethers` |  |
+| **viem** | Modern TypeScript-first alternative to ethers | `npm install viem` |  |
+
+**Recommendation:** If you're new to Base development, start with Remix — no local environment required. If you're building a production integration, use Foundry or Hardhat with a proper test suite.
+
+## 4. Install the IFÁ Labs Interface Package
+
+For Solidity projects, install the official interface package for type-safe contract interactions:
+
+```bash
+npm install ifapricefeed-interface
+```
+
+This gives you:
+
+- The complete `IIfaPriceFeed` Solidity interface
+- Full struct and event type definitions
+- The latest ABI
+
+Import it directly in your contracts:
+
+```solidity
+import "ifapricefeed-interface/IIfaPriceFeed.sol";
+```
+
+<Tip>
+  Using Foundry? You can also install the interface as a lib dependency via `forge install IFA-Labs/IfaPriceFeed-interface` and reference it in your `remappings.txt`.
+</Tip>
+
+## You're Ready
+
+Once your wallet is connected to Base Sepolia and you have testnet ETH, you're set. Head to the next page to fetch your first on-chain price.
+
+<CardGroup cols={2}>
+  <Card title="Get Your First Price" icon="bolt" href="/get-your-first-price-on-chain">
+    Fetch a live stablecoin price from the IFÁ Labs oracle in minutes.
+  </Card>
+
+  <Card title="Contract Addresses" icon="file-contract" href="/contract-addresses">
+    View all deployed contract addresses across supported networks.
+  </Card>
+</CardGroup>

@@ -1,0 +1,150 @@
+---
+title: "Get Help"
+description: "Every channel for getting support with IFÁ Labs — technical questions, integration help, bug reports, and real-time community assistance."
+---
+
+IFÁ Labs is committed to making integrations smooth and well-supported. This page lists every available support channel, what each one is best for, and what to include in your request to get the fastest possible response.
+
+---
+
+## Support Channels
+
+### Technical and Integration Support
+
+For detailed technical questions, integration issues, code reviews, or anything requiring a thorough written response:
+
+<Card title="Email — support@ifalabs.com" icon="envelope" href="mailto:support@ifalabs.com">
+  Best for: integration guidance, debugging help, new feed requests, and any question that benefits from a detailed written response. Response within 24–48 hours.
+</Card>
+
+---
+
+### Security and Vulnerability Reports
+
+For any potential security issue, vulnerability, or suspicious contract behaviour:
+
+<Card title="Security — support@ifalabs.com" icon="shield" href="mailto:support@ifalabs.com">
+  Best for: responsible disclosure of vulnerabilities, suspicious contract addresses, or any finding that could affect protocol security. Do not use public channels for security reports. See the full disclosure policy at Report a Vulnerability.
+</Card>
+
+---
+
+### Real-Time Community Support
+
+For quick questions, incident updates, and developer community discussion:
+
+<CardGroup cols={2}>
+  <Card title="Telegram" icon="message" href="https://t.me/ifalabs">
+    t.me/ifalabs — fastest response for quick questions, incident announcements, and ecosystem updates. Most active channel for real-time communication.
+  </Card>
+
+  <Card title="X / Twitter" icon="x-twitter" href="https://x.com/ifalabs">
+    @ifalabs — deployment announcements, new asset feeds, ecosystem news, and developer content.
+  </Card>
+</CardGroup>
+
+---
+
+### Bug Reports and Feature Requests
+
+For non-security bugs, documentation issues, integration problems, and feature requests:
+
+<Card title="GitHub Issues" icon="github" href="https://github.com/IFA-Labs/oracle_contract/issues/new">
+  github.com/IFA-Labs/oracle\_contract/issues — open an issue with the Bug Report or Feature Request template. Include reproduction steps, network, contract address, and any relevant transaction hashes.
+</Card>
+
+---
+
+## What to Include in Your Request
+
+A well-structured support request gets resolved significantly faster than a vague one. Include as much of the following as applies to your situation:
+
+**For integration issues:**
+
+- The network you are working on — Base Mainnet, Base Sepolia, or AssetChain Testnet
+- The oracle contract address you are using
+- The asset ID or symbol you are querying
+- Your development tool — Foundry, Hardhat, ethers.js, web3.py, wagmi, or other
+- The exact error message or revert reason
+- A minimal code snippet reproducing the issue
+- The transaction hash if the issue occurred on-chain
+
+**For feed or data issues:**
+
+- The asset symbol and asset ID
+- The network
+- The current on-chain price and `lastUpdateTime`
+- The external market price you are comparing against
+- The timestamp of when you observed the discrepancy
+
+**For new feed requests:**
+
+- Token contract address on all relevant chains
+- Backing mechanism and reserve proof or documentation
+- Current daily trading volume across all venues
+- The protocol or use case driving the request
+
+---
+
+## Common Requests We Handle
+
+| Request Type | Best Channel | Response Time |
+| --- | --- | --- |
+| Integration debugging | Email | 24–48 hours |
+| New feed request | Email or GitHub | 48–72 hours |
+| Staleness or data issue | Telegram then Email if unresolved | Telegram: minutes — Email: 24hrs |
+| Security vulnerability | [support@ifalabs.com](mailto:support@ifalabs.com) | 48 hours |
+| Documentation error | GitHub issue | 24–48 hours |
+| General question | Telegram | Minutes to hours |
+| Partnership or BD inquiry | Email | 48–72 hours |
+
+---
+
+## Before Reaching Out
+
+Most integration issues are covered in the documentation. Check these resources first — they resolve the majority of common problems without requiring a support request:
+
+<CardGroup cols={2}>
+  <Card title="Common Integration Errors" icon="triangle-exclamation" href="/common-integration-errors">
+    The most frequent errors developers encounter — causes, diagnostics, and fixes.
+  </Card>
+
+  <Card title="Price Appears Stale" icon="clock" href="/price-appears-stale">
+    Dedicated diagnostic guide for staleness issues.
+  </Card>
+
+  <Card title="Error Code Reference" icon="code" href="/error-code-reference">
+    Every revert error the oracle and integration patterns produce.
+  </Card>
+
+  <Card title="FAQ" icon="circle-question" href="/faq">
+    Answers to the most common questions about IFÁ Labs.
+  </Card>
+</CardGroup>
+
+---
+
+## Response Commitments
+
+| Channel | First Response | Resolution |
+| --- | --- | --- |
+| Email — general | Within 48 hours | Varies by complexity |
+| Email — security | Within 48 hours | Status update within 5 business days |
+| Telegram | Minutes to hours during business hours | Varies |
+| GitHub Issues | Within 48 hours | Varies by priority |
+
+Business hours are West Africa Time (WAT, UTC\+1). Response times may be longer outside these hours for email and GitHub — Telegram is monitored more continuously.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="GitHub & Bug Reports" icon="github" href="/github-and-bug-reports">
+    Full guide to contributing code, reporting bugs, and working with the IFÁ Labs repository.
+  </Card>
+
+  <Card title="FAQ" icon="circle-question" href="/faq">
+    Answers to the most frequently asked questions about IFÁ Labs.
+  </Card>
+</CardGroup>

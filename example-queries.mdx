@@ -1,0 +1,539 @@
+---
+title: "Example Queries"
+description: "Practical prompts and real workflows for using the IFÁ Labs MCP Server across every supported client and use case."
+---
+
+This page shows exactly how to use the IFÁ Labs MCP Server in practice — from single price checks to multi-asset workflows to agent-based automation. Every example is a real prompt you can use directly in your MCP client.
+
+---
+
+## Basic Price Queries
+
+The most common use case — checking a live stablecoin price without leaving your editor or AI assistant.
+
+### Single Asset Price
+
+**Prompt:**
+
+> "What is the current USDT/USD price from IFÁ Labs on Base Mainnet?"
+
+**Tools called:** `get_asset_price`
+
+**Response:**
+
+```text
+The current USDT/USD price on Base Mainnet is $1.000124.
+The feed was last updated 412 seconds ago.
+```
+
+---
+
+### Multiple Asset Prices
+
+**Prompt:**
+
+> "Get the current prices for USDT, CNGN, ZARP, and BRZ from IFÁ Labs."
+
+**Tools called:** `get_multiple_prices`
+
+**Response:**
+
+```text
+Current IFÁ Labs prices on Base Mainnet:
+
+USDT/USD  →  $1.000124   (updated 412s ago)
+CNGN/USD  →  $0.000613   (updated 1,659s ago)
+ZARP/USD  →  $0.054821   (updated 968s ago)
+BRZ/USD   →  $0.182340   (updated 731s ago)
+
+All feeds are within the 1-hour freshness threshold.
+```
+
+---
+
+### Emerging Market Stablecoin Snapshot
+
+**Prompt:**
+
+> "Give me a snapshot of all IFÁ Labs emerging market stablecoin prices right now."
+
+**Tools called:** `get_supported_assets`, `get_multiple_prices`
+
+**Response:**
+
+```text
+IFÁ Labs Emerging Market Stablecoin Snapshot — Base Mainnet
+
+CNGN/USD (Nigerian Naira)       →  $0.000613
+ZARP/USD (South African Rand)   →  $0.054821
+BRZ/USD  (Brazilian Real)       →  $0.182340
+
+All feeds are live and fresh as of this query.
+```
+
+---
+
+## Freshness and Staleness Checks
+
+Before deploying, executing a settlement, or running liquidation simulations, verify your feeds are fresh.
+
+### Check a Single Feed
+
+**Prompt:**
+
+> "Is the CNGN/USD price feed on IFÁ Labs fresh enough to use for a liquidation check? I need it to be within 30 minutes."
+
+**Tools called:** `check_price_freshness`
+
+**Response:**
+
+```text
+CNGN/USD freshness check — Base Mainnet
+
+Last updated:         27 minutes ago
+Max age threshold:    30 minutes
+Status:               ✓ Fresh
+Time until stale:     3 minutes
+
+Note: The feed is fresh but close to your 30-minute threshold.
+Consider monitoring it before executing the liquidation.
+```
+
+---
+
+### Check All Feeds Before Deployment
+
+**Prompt:**
+
+> "Before I deploy my stablecoin vault to Base Mainnet, check the freshness of all IFÁ Labs feeds I'm using: USDT, USDC, and CNGN."
+
+**Tools called:** `get_multiple_prices`, `check_price_freshness` × 3
+
+**Response:**
+
+```text
+Pre-deployment feed freshness check — Base Mainnet
+
+USDT/USD  →  ✓ Fresh   (updated 7 minutes ago)
+USDC/USD  →  ✓ Fresh   (updated 12 minutes ago)
+CNGN/USD  →  ✓ Fresh   (updated 28 minutes ago)
+
+All three feeds are within the 1-hour threshold.
+Safe to proceed with deployment.
+```
+
+---
+
+## Asset ID Resolution
+
+Verify asset IDs before hardcoding them in contracts — directly from your coding assistant.
+
+### Resolve a Single Asset ID
+
+**Prompt:**
+
+> "What is the IFÁ Labs asset ID for ZARP/USD? I need the bytes32 value to hardcode in my contract."
+
+**Tools called:** `get_asset_id`
+
+**Response:**
+
+```text
+ZARP/USD Asset ID
+
+bytes32 value:
+0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8
+
+Generated via:
+keccak256(abi.encodePacked("ZARP/USD"))
+
+Verified: active feed on Base Mainnet ✓
+
+Use in Solidity:
+bytes32 public constant ZARP_ASSET_ID =
+    0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8;
+```
+
+---
+
+### Get All Asset IDs at Once
+
+**Prompt:**
+
+> "Give me the IFÁ Labs bytes32 asset IDs for all supported stablecoins so I can add them as constants in my contract."
+
+**Tools called:** `get_supported_assets`
+
+**Response:**
+
+```solidity
+// IFÁ Labs Asset ID Constants
+// Source: IFÁ Labs MCP Server — Base Mainnet
+
+bytes32 public constant USDT_ASSET_ID =
+    0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d;
+
+bytes32 public constant USDC_ASSET_ID =
+    0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d;
+
+bytes32 public constant CNGN_ASSET_ID =
+    0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a;
+
+bytes32 public constant ZARP_ASSET_ID =
+    0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8;
+
+bytes32 public constant BRZ_ASSET_ID =
+    0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5;
+
+bytes32 public constant ETH_ASSET_ID =
+    0x8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0;
+```
+
+---
+
+## Cross-Asset and Derived Pair Queries
+
+Price one stablecoin against another without a direct feed.
+
+### CNGN to USDT Rate
+
+**Prompt:**
+
+> "How much USDT is one CNGN worth right now according to IFÁ Labs?"
+
+**Tools called:** `get_derived_pair`
+
+**Response:**
+
+```text
+Derived Pair — CNGN/USDT — Base Mainnet
+
+1 CNGN = 0.000613 USDT
+
+Computed from:
+  CNGN/USD  →  $0.000613
+  USDT/USD  →  $1.000124
+
+Both underlying feeds are fresh.
+```
+
+---
+
+### ZARP to USDC Rate
+
+**Prompt:**
+
+> "What is the current ZARP to USDC exchange rate on IFÁ Labs?"
+
+**Tools called:** `get_derived_pair`
+
+**Response:**
+
+```text
+Derived Pair — ZARP/USDC — Base Mainnet
+
+1 ZARP = 0.054814 USDC
+
+Computed from:
+  ZARP/USD  →  $0.054821
+  USDC/USD  →  $1.000124
+
+Both underlying feeds are fresh.
+```
+
+---
+
+### Multi-Currency Basket Valuation
+
+**Prompt:**
+
+> "I have a basket of 10,000 CNGN, 5,000 ZARP, and 1,000 BRZ. What is the total USD value based on IFÁ Labs prices?"
+
+**Tools called:** `get_multiple_prices`
+
+**Response:**
+
+```text
+Basket Valuation — Base Mainnet
+
+10,000 CNGN  ×  $0.000613  =  $6.13
+ 5,000 ZARP  ×  $0.054821  =  $274.11
+ 1,000 BRZ   ×  $0.182340  =  $182.34
+
+Total USD Value:  $462.58
+
+All prices sourced from IFÁ Labs on-chain oracle — Base Mainnet.
+Last updated within the past 30 minutes.
+```
+
+---
+
+## Development Workflows
+
+Queries designed for developers actively building integrations.
+
+### Pre-Integration Setup Check
+
+**Prompt:**
+
+> "I'm about to integrate IFÁ Labs into my protocol on Base Mainnet. Give me the oracle contract address, the asset IDs for USDT and CNGN, and confirm both feeds are currently fresh."
+
+**Tools called:** `get_network_info`, `get_asset_id` × 2, `check_price_freshness` × 2
+
+**Response:**
+
+```text
+IFÁ Labs Integration Setup — Base Mainnet
+
+Oracle Contract:
+0xA9F17344689C2c2328F94464998db1d3e35B80dC
+
+Asset IDs:
+USDT/USD  →  0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d
+CNGN/USD  →  0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a
+
+Feed Freshness:
+USDT/USD  →  ✓ Fresh (updated 7 minutes ago)
+CNGN/USD  →  ✓ Fresh (updated 28 minutes ago)
+
+You're clear to proceed with integration.
+```
+
+---
+
+### Testnet vs Mainnet Price Comparison
+
+**Prompt:**
+
+> "Compare the USDT/USD price on Base Sepolia testnet versus Base Mainnet using IFÁ Labs."
+
+**Tools called:** `get_asset_price` × 2 (different networks)
+
+**Response:**
+
+```text
+USDT/USD Price Comparison
+
+Base Mainnet   →  $1.000124  (updated 412s ago)
+Base Sepolia   →  $1.000000  (updated 1,832s ago)
+
+Note: Testnet oracle prices reflect testnet relayer activity
+and may differ from mainnet values. Always test against
+Base Sepolia before deploying to mainnet.
+```
+
+---
+
+### Verify a Contract Constant Before Deployment
+
+**Prompt:**
+
+> "I have this asset ID hardcoded in my contract: `0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a` Can you verify it's correct for CNGN/USD on IFÁ Labs?"
+
+**Tools called:** `get_asset_id`
+
+**Response:**
+
+```text
+Asset ID Verification
+
+Provided ID:
+0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a
+
+Expected ID for CNGN/USD:
+0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a
+
+Match:    ✓ Correct
+Verified: Active feed on Base Mainnet ✓
+
+Your hardcoded constant is correct.
+```
+
+---
+
+## Agent and Automation Workflows
+
+Queries for AI agents, monitoring pipelines, and automated workflows consuming IFÁ Labs data.
+
+### Automated Feed Health Check
+
+**Prompt (automated agent):**
+
+> "Run a health check on all IFÁ Labs price feeds. Flag any that are stale beyond 2 hours."
+
+**Tools called:** `get_supported_assets`, `check_price_freshness` × 6
+
+**Response:**
+
+```text
+IFÁ Labs Feed Health Check — Base Mainnet
+Threshold: 2 hours (7,200 seconds)
+
+USDT/USD  →  ✓  (updated 7 minutes ago)
+USDC/USD  →  ✓  (updated 12 minutes ago)
+CNGN/USD  →  ✓  (updated 28 minutes ago)
+ZARP/USD  →  ✓  (updated 16 minutes ago)
+BRZ/USD   →  ✓  (updated 22 minutes ago)
+ETH/USD   →  ✓  (updated 9 minutes ago)
+
+All 6 feeds are healthy. No action required.
+```
+
+---
+
+### Protocol Risk Assessment
+
+**Prompt:**
+
+> "I'm running a stablecoin lending protocol using USDT, USDC, and CNGN as collateral. Assess the current oracle risk based on IFÁ Labs feed freshness and peg deviation."
+
+**Tools called:** `get_multiple_prices`, `check_price_freshness` × 3
+
+**Response:**
+
+```text
+Oracle Risk Assessment — Base Mainnet
+
+Feed Freshness:
+USDT/USD  →  ✓ Fresh  (7 min)   — within 1hr threshold
+USDC/USD  →  ✓ Fresh  (12 min)  — within 1hr threshold
+CNGN/USD  →  ✓ Fresh  (28 min)  — within 1hr threshold
+
+Peg Deviation:
+USDT/USD  →  +0.012%  — well within normal range
+USDC/USD  →  -0.003%  — well within normal range
+CNGN/USD  →  N/A      — emerging market asset, peg check not applicable
+
+Risk Level:  LOW
+Assessment:  All feeds are fresh and stable.
+             No oracle-related risk factors detected.
+             Protocol is operating within normal parameters.
+```
+
+---
+
+### Price Feed Monitoring Alert
+
+**Prompt (scheduled agent, runs every 15 minutes):**
+
+> "Check if any IFÁ Labs feeds have gone stale in the last 15 minutes. If yes, return the asset name, current age, and recommended action."
+
+**Tools called:** `get_supported_assets`, `check_price_freshness` × 6
+
+**Response (stale feed detected):**
+
+```text
+IFÁ Labs Staleness Alert — Base Mainnet
+
+⚠️  STALE FEED DETECTED
+
+Asset:          BRZ/USD
+Current Age:    4,312 seconds (71 minutes)
+Threshold:      3,600 seconds (60 minutes)
+Exceeded by:    712 seconds (12 minutes)
+
+Recommended Actions:
+1. Check IFÁ Labs status via Telegram: t.me/ifalabs
+2. Verify relayer activity on Basescan events for BRZ/USD
+3. If your protocol uses BRZ as collateral, consider activating
+   your fallback oracle or pausing BRZ-related operations
+4. If staleness persists beyond 12 hours, report via
+   support@ifalabs.com
+
+Other feeds: All healthy ✓
+```
+
+---
+
+## Network and Contract Information
+
+Quick lookups for network configuration and contract details.
+
+### Get Contract Address
+
+**Prompt:**
+
+> "What is the IFÁ Labs oracle contract address on Base Mainnet?"
+
+**Tools called:** `get_network_info`
+
+**Response:**
+
+```text
+IFÁ Labs Oracle — Base Mainnet
+
+Contract Address:
+0xA9F17344689C2c2328F94464998db1d3e35B80dC
+
+Block Explorer:
+https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC
+
+Chain ID:   8453
+RPC URL:    https://mainnet.base.org
+Status:     Live
+```
+
+---
+
+### Full Network Reference
+
+**Prompt:**
+
+> "Give me a full network reference for all IFÁ Labs deployments."
+
+**Tools called:** `get_network_info`
+
+**Response:**
+
+```text
+IFÁ Labs Network Reference
+
+Base Mainnet
+  Chain ID:         8453
+  Oracle:           0xA9F17344689C2c2328F94464998db1d3e35B80dC
+  RPC:              https://mainnet.base.org
+  Explorer:         https://basescan.org
+  Status:           Live ✓
+
+Base Sepolia
+  Chain ID:         84532
+  Oracle:           0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b
+  RPC:              https://sepolia.base.org
+  Explorer:         https://sepolia.basescan.org
+  Status:           Testnet
+
+AssetChain Testnet
+  Chain ID:         42421
+  Oracle:           0xBAc31e568883774A632275F9c8E7A5Bd117000F7
+  RPC:              https://enugu-rpc.assetchain.org
+  Explorer:         https://scan-testnet.assetchain.org
+  Status:           Testnet
+```
+
+---
+
+## Tips for Writing Effective Prompts
+
+Getting the best results from the IFÁ Labs MCP Server comes down to specificity. Here's what works:
+
+**Always specify the asset in `"SYMBOL/USD"` format when possible.** "CNGN price" works, but "CNGN/USD price on Base Mainnet" is unambiguous and gives the model everything it needs to call the right tool with the right parameters without guessing.
+
+**Specify the network when it matters.** If you're working on a testnet integration, say "Base Sepolia" explicitly. Without a network qualifier, the server defaults to Base Mainnet.
+
+**State your threshold when checking freshness.** "Is the feed fresh?" leaves the threshold ambiguous. "Is the feed fresh within a 30-minute window?" gives the tool a precise `max_age_seconds` value to evaluate against.
+
+**Chain multiple requests in a single prompt for complex workflows.** The MCP client will execute multiple tool calls in sequence. "Get the CNGN price, check its freshness, and give me its asset ID" triggers three tool calls in one prompt rather than requiring three separate messages.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="MCP Client Compatibility" icon="plug" href="/mcp-client-compatibility">
+    Detailed compatibility notes and known limitations for every supported client.
+  </Card>
+
+  <Card title="Available Tools" icon="wrench" href="/available-tools">
+    Full reference for every tool the IFÁ Labs MCP Server exposes.
+  </Card>
+</CardGroup>

@@ -1,0 +1,61 @@
+---
+title: "Why Stablecoin-Focused Oracles?"
+description: "Most oracle networks treat stablecoins as an afterthought. Here's why that's a problem — and what IFÁ Labs does differently."
+---
+
+Stablecoins have quietly become the most important primitive in on-chain finance. They power lending markets, cross-border payments, remittances, savings products, and everyday transactions — especially in emerging economies where local currencies are volatile and dollar access is limited.
+
+But there's a structural problem: the oracle infrastructure that DeFi runs on was never designed with stablecoins in mind.
+
+## The Gap in General-Purpose Oracles
+
+Networks like Chainlink and Pyth are exceptional at what they were built for — pricing volatile, high-volume assets like BTC, ETH, and major altcoins. Stablecoins were an afterthought.
+
+The result:
+
+**Limited coverage for local stablecoins.** Assets like cNGN (Nigeria), ZARP (South Africa), and BRZ (Brazil) don't meet the listing criteria or trading volume thresholds of general-purpose networks. They either have no dedicated feed at all, or rely on infrequent, low-confidence data.
+
+**Update logic built for volatility.** Standard deviation thresholds are calibrated for assets that move 5–10% in a day. For a stablecoin, a 0.3% depeg is a critical event. General-purpose oracles often miss it entirely.
+
+**No regional data sources.** Accurately pricing a Nigerian naira stablecoin requires pulling from Nigerian exchanges, local forex providers, and P2P markets — not just Binance and Coinbase. Most oracle networks don't have those integrations.
+
+**The consequence is serious.** A single stale or manipulated price feed can trigger mass liquidations, enable arbitrage exploits, or silently erode user funds in savings and lending protocols. The lower the volatility of the asset, the less tolerance there is for pricing error.
+
+## Why Stablecoins Deserve Dedicated Infrastructure
+
+Stablecoin pricing has unique characteristics that demand a specialized approach:
+
+- **Tight peg tolerance.** A $0.97 USDC price is a red flag. A $97,000 BTC price might be noise. The acceptable deviation range for stablecoins is an order of magnitude smaller, and the aggregation logic needs to reflect that.
+- **Emerging market data sources.** Local stablecoins trade on regional venues that global oracle networks don't monitor. Accurate pricing requires integrating those sources — not ignoring them.
+- **Frequency calibrated to peg behavior.** Pushing an update every 60 seconds for an asset that moves 0.01% wastes gas and congests the network. But pushing too infrequently misses real depeg events. The right cadence for stablecoins is different from volatile assets, and it needs to be tuned accordingly.
+- **Real economic stakes.** In markets like Nigeria, South Africa, and Brazil, stablecoins aren't speculative instruments — they're how people protect savings, receive remittances, and run businesses. Inaccurate pricing in these contexts has direct, real-world consequences.
+
+## What IFÁ Labs Does Differently
+
+IFÁ Labs was built specifically around these constraints.
+
+Every design decision — from the data sources integrated, to the outlier detection logic, to the deviation thresholds — is calibrated for stablecoin behavior and emerging market assets.
+
+The result is oracle infrastructure that provides:
+
+- Dedicated feeds for global stablecoins (USDT, USDC) and local ones (cNGN, ZARP, BRZ)
+- Aggregation logic with tight peg-aware thresholds — not repurposed volatile-asset logic
+- Regional data source integrations that accurately reflect local market conditions
+- Fully on-chain, audited contracts with no off-chain dependencies for price reads
+- Multi-chain coverage designed to follow stablecoin activity wherever it lives
+
+<Info>
+  IFÁ Labs doesn't compete with general-purpose oracles. It specializes where they generalize. For protocols that rely on stablecoin pricing — especially in emerging markets — that specialization is the difference between reliable infrastructure and a liability.
+</Info>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Key Differentiators" icon="scale-balanced" href="/key-differentiators-vs-chainlink-pyth">
+    See a direct comparison with Chainlink and Pyth.
+  </Card>
+
+  <Card title="Supported Assets" icon="coins" href="/supported-assets">
+    View all currently supported stablecoin feeds.
+  </Card>
+</CardGroup>

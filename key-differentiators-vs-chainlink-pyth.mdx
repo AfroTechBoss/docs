@@ -1,0 +1,66 @@
+---
+title: "Key Differentiators"
+description: "How IFÁ Labs compares to Chainlink and Pyth — and why specialization beats generalization for stablecoin pricing."
+---
+
+General-purpose oracle networks are excellent infrastructure. But "general-purpose" is the key phrase. When your protocol's correctness depends on stablecoin pricing — especially for local emerging-market assets — general-purpose is not good enough.
+
+Here's how IFÁ Labs compares directly.
+
+## Side-by-Side Comparison
+
+| Feature | IFÁ Labs | Chainlink | Pyth |
+| --- | --- | --- | --- |
+| **Primary Focus** | Stablecoins — global and emerging market | Broad: crypto, commodities, forex, equities | High-frequency trading pairs, volatile assets |
+| **Local Stablecoin Coverage** | Dedicated feeds (cNGN, ZARP, BRZ, and growing) | Selective — low-volume assets often excluded | Minimal to none |
+| **Aggregation Logic** | Tuned for peg-stable behavior and tight deviation | General-purpose thresholds | Sub-second for volatile assets |
+| **Regional Data Sources** | Integrated — local exchanges, forex providers, P2P markets | Limited | Limited |
+| **Update Trigger Model** | Hybrid deviation \+ time, calibrated per asset | General deviation \+ heartbeat | Pull-based, publisher-signed |
+| **On-Chain Model** | Fully trustless — audited EVM contracts, no off-chain reads | Decentralized node network \+ economic security | Pull-based — requires on-chain price submission per use |
+| **L2 Gas Efficiency** | Optimized for Base and low-cost chains | Higher overhead on some networks | Efficient but broader scope |
+| **Emerging Market Focus** | Core mission | Not prioritized | Not prioritized |
+| **Audit Status** | Audited by A&D Forensics — all findings resolved | Extensively audited | Extensively audited |
+
+## Where the Differences Matter Most
+
+### Local Stablecoin Coverage
+
+This is the sharpest distinction. cNGN, ZARP, and BRZ do not have reliable, dedicated feeds on Chainlink or Pyth. For any protocol building on these assets — lending markets, payment rails, savings vaults — IFÁ Labs is currently the only option for trustless on-chain pricing.
+
+### Aggregation Logic Tuned for Peg Behavior
+
+General-purpose oracles are calibrated for assets that move. A 2% deviation threshold makes sense for ETH. For USDT, it means the oracle won't trigger an update until the asset is already significantly off-peg — precisely when accurate pricing matters most.
+
+IFÁ Labs uses tight, peg-aware deviation thresholds designed specifically for stablecoin behavior. Updates fire when they need to, not when a repurposed volatile-asset threshold is finally breached.
+
+### Regional Data Source Integration
+
+Accurately pricing a Nigerian naira stablecoin or a South African rand stablecoin requires data from the markets where those assets actually trade — local exchanges, regional forex providers, P2P platforms. IFÁ Labs integrates those sources directly. Networks built around global crypto markets do not.
+
+### On-Chain Read Model
+
+IFÁ Labs prices are stored on-chain and readable with a single view call — no transaction, no gas, no off-chain request. Pyth's pull-based model requires submitting a price update on-chain before reading it, which adds friction and cost for certain use cases. IFÁ Labs eliminates that step entirely.
+
+## How to Think About It
+
+IFÁ Labs is not a replacement for Chainlink or Pyth. It is purpose-built infrastructure for a specific problem they don't solve well.
+
+For volatile assets with deep global liquidity — ETH, BTC, major altcoins — Chainlink and Pyth are the right tools. For stablecoins, especially local ones in emerging markets, IFÁ Labs provides coverage, accuracy, and update logic that general-purpose networks cannot match.
+
+Many production protocols will use both: IFÁ Labs for stablecoin feeds, a general-purpose oracle for volatile asset pricing. That's the right architecture.
+
+<Tip>
+  Building a protocol that uses both stablecoin and volatile asset pricing? Use IFÁ Labs for your stablecoin feeds and implement a fallback strategy for redundancy. See [Building Fallback Strategies](/building-fallback-strategies) for a production-ready implementation guide.
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Supported Assets" icon="coins" href="/supported-assets">
+    View all currently supported stablecoin price feeds.
+  </Card>
+
+  <Card title="Quickstart" icon="bolt" href="/prerequisites">
+    Start integrating IFÁ Labs in minutes.
+  </Card>
+</CardGroup>

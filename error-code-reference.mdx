@@ -1,0 +1,405 @@
+---
+title: "Error Code Reference"
+description: "Every revert error produced by the IFÁ Labs oracle contract and integration patterns — causes, selectors, and resolution steps."
+---
+
+This page is the complete reference for every error the IFÁ Labs oracle contract and recommended integration patterns can produce. Use it when debugging unexpected reverts in tests, on testnets, or in production transactions.
+
+---
+
+## How to Read a Revert
+
+When a transaction reverts, the EVM returns error data that encodes which error fired and with what parameters. Three tools for decoding this:
+
+### Foundry
+
+```bash
+# Run with -vvvv for full revert trace
+forge test -vvvv --match-test test_myFailingTest
+
+# Cast to decode a revert from a live transaction
+cast run <TX_HASH> --rpc-url https://mainnet.base.org
+```
+
+### ethers.js
+
+```javascript
+try {
+  await oracle.getAssetInfo(assetId);
+} catch (err) {
+  // ethers v6 — error data is in err.data
+  console.log("Revert reason:", err.reason);
+  console.log("Error data:",   err.data);
+
+  // Decode custom error manually if needed
+  const iface  = new ethers.Interface([
+    "error AssetNotSupported(bytes32 assetId)",
+    "error InvalidAssetIndexLength(uint256 len0, uint256 len1)",
+  ]);
+
+  try {
+    const decoded = iface.parseError(err.data);
+    console.log("Decoded error:", decoded.name, decoded.args);
+  } catch {
+    console.log("Unknown error format");
+  }
+}
+```
+
+### Basescan
+
+Open the failed transaction on Basescan. The **Overview** tab shows the revert reason if the contract source is verified. The **Internal Txns** tab shows which internal call produced the revert.
+
+---
+
+## Contract Errors
+
+Errors produced directly by the IFÁ Labs oracle contract.
+
+---
+
+### `AssetNotSupported`
+
+```solidity
+error AssetNotSupported(bytes32 assetId);
+```
+
+**When it fires:** A derived pair function received an asset ID that has no corresponding price feed in the oracle contract.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `assetId` | `bytes32` | The unrecognised asset ID that was passed |
+
+**Does not fire from:** `getAssetInfo` and `getAssetsInfo` — these return `exists = false` instead of reverting.
+
+**Resolution:**
+
+```javascript
+// Step 1: Verify the asset ID is correctly formed
+const { ethers } = require("ethers");
+const computed = ethers.keccak256(ethers.toUtf8Bytes("USDT/USD"));
+console.log(computed);
+// Should match: 0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d
+
+// Step 2: Confirm the asset is supported
+// Call getAssetInfo with the ID — exists = false means unsupported
+```
+
+See [Supported Assets](/supported-assets) for the full list of valid asset IDs.
+
+---
+
+### `InvalidAssetIndexLength`
+
+```solidity
+error InvalidAssetIndexLength(uint256 len0, uint256 len1);
+```
+
+**When it fires:** `getPairsbyIdForward` or `getPairsbyIdBackward` received input arrays of different lengths.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `len0` | `uint256` | Length of the first asset array (`_assetIndexes0`) |
+| `len1` | `uint256` | Length of the second asset array (`_assetsIndexes1`) |
+
+**Resolution:**
+
+```solidity
+// ✅ Correct — both arrays must be the same length
+bytes32[] memory assets0 = new bytes32[](2);
+bytes32[] memory assets1 = new bytes32[](2); // same length as assets0
+
+assets0[0] = CNGN_ASSET_ID; assets1[0] = USDT_ASSET_ID;
+assets0[1] = ZARP_ASSET_ID; assets1[1] = USDC_ASSET_ID;
+
+ORACLE.getPairsbyIdForward(assets0, assets1);
+```
+
+The error parameters tell you exactly what lengths were received — use them to identify which array was the wrong size.
+
+---
+
+### `InvalidAssetOrDirectionLength`
+
+```solidity
+error InvalidAssetOrDirectionLength(uint256 len0, uint256 len1, uint256 lenDir);
+```
+
+**When it fires:** `getPairsbyId` received arrays where the asset arrays and the directions array are not all the same length.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `len0` | `uint256` | Length of `_assetIndexes0` |
+| `len1` | `uint256` | Length of `_assetsIndexes1` |
+| `lenDir` | `uint256` | Length of `_directions` |
+
+**Resolution:**
+
+```solidity
+// ✅ Correct — all three arrays must be the same length
+bytes32[]       memory assets0    = new bytes32[](2);
+bytes32[]       memory assets1    = new bytes32[](2);
+PairDirection[] memory directions = new PairDirection[](2); // same length
+
+assets0[0]    = CNGN_ASSET_ID;
+assets1[0]    = USDT_ASSET_ID;
+directions[0] = IIfaPriceFeed.PairDirection.Forward;
+
+assets0[1]    = ZARP_ASSET_ID;
+assets1[1]    = USDC_ASSET_ID;
+directions[1] = IIfaPriceFeed.PairDirection.Backward;
+
+ORACLE.getPairsbyId(assets0, assets1, directions);
+```
+
+---
+
+## Integration Pattern Errors
+
+Errors produced by the recommended integration patterns documented in this guide — not by the oracle contract itself, but by the verification logic in your consuming contract.
+
+---
+
+### `"IFA: asset not supported"`
+
+**Type:** `require` revert string (or custom error in your contract)
+
+**When it fires:** Your contract called `getAssetInfo`, received `exists = false`, and your existence check caught it.
+
+**This is correct behaviour.** The oracle returned a valid response — the asset simply is not supported. The error is in the asset ID being passed to your contract, not in the oracle.
+
+**Resolution:** Verify the asset ID using the diagnosis script in [Common Integration Errors](/troubleshooting/common-integration-errors#exists--false).
+
+---
+
+### `"IFA: price feed is stale"`
+
+**Type:** `require` revert string (or custom error in your contract)
+
+**When it fires:** `block.timestamp - info.lastUpdateTime > MAX_PRICE_AGE` in your staleness check.
+
+**Resolution steps:**
+
+<Steps>
+  <Step title="Check the actual feed age">
+    Read `lastUpdateTime` from the contract and calculate the current age:
+
+    ```javascript
+        const [info, exists] = await oracle.getAssetInfo(assetId);
+        const age = Math.floor(Date.now() / 1000) - Number(info.lastUpdateTime);
+        console.log(`Feed age: ${age}s`);
+    ```
+  </Step>
+  <Step title="Compare against your MAX_PRICE_AGE">
+    If the feed age is consistently above your threshold during normal market conditions, your `MAX_PRICE_AGE` is too tight. Set it to at least 1.5× the asset's heartbeat interval.
+  </Step>
+  <Step title="Check if all feeds are affected">
+    If every asset is stale simultaneously, a relayer issue may be affecting the deployment. Check the [IFÁ Labs Telegram](https://t.me/ifalabs).
+  </Step>
+  <Step title="Report if prolonged">
+    If a specific feed remains stale beyond 12 hours with no incident announcement, report it to [support@ifalabs.com](mailto:support@ifalabs.com).
+  </Step>
+</Steps>
+
+---
+
+### `"IFA: price deviation exceeded"`
+
+**Type:** `require` revert string (or custom error in your contract)
+
+**When it fires:** Your peg deviation circuit breaker detected a price outside the acceptable band around the expected peg.
+
+**Two scenarios:**
+
+**Scenario A — Genuine depeg event.** The stablecoin has moved off its peg in the real market. Your circuit breaker is working correctly. Do not bypass it. Investigate the market condition before resuming protocol operations for the affected asset.
+
+**Scenario B — Threshold too tight.** Your `MAX_DEVIATION_BPS` is set tighter than the asset's natural peg fluctuation range. Emerging market stablecoins (CNGN, ZARP, BRZ) have slightly wider natural ranges than global stablecoins (USDT, USDC).
+
+```solidity
+// Recommended starting thresholds
+uint256 constant GLOBAL_MAX_DEVIATION    = 100;  // 1.0% — USDT, USDC
+uint256 constant EMERGING_MAX_DEVIATION  = 500;  // 5.0% — CNGN, ZARP, BRZ
+```
+
+**Important:** Do not apply a \$1.00 peg deviation check to ETH/USD. ETH is not a stablecoin and has no fixed peg.
+
+---
+
+### `"IFA: price must be positive"`
+
+**Type:** `require` revert string
+
+**When it fires:** `info.price` returned from the oracle was zero or negative — and your integration correctly guards against this before casting `int256` to `uint256`.
+
+**This should not occur** with any currently supported feed under normal operation — the oracle's zero-price guard (a post-audit fix) prevents zero prices from being stored on-chain. If you encounter this error:
+
+1. Confirm you are using the correct oracle address for your network
+2. Check if the asset ID is correct — `exists = false` returns zero-valued fields
+3. Report it immediately to [support@ifalabs.com](mailto:support@ifalabs.com) if the asset exists but the price is zero
+
+---
+
+### `"IFA: unsupported asset in batch"`
+
+**Type:** `require` revert string
+
+**When it fires:** Your batch processing loop checked `exists[i]` and found `false` for one of the assets in a `getAssetsInfo` call.
+
+**Resolution:** Identify which asset ID in your batch returned `exists = false` and debug that specific ID using the diagnosis steps in [Common Integration Errors](/troubleshooting/common-integration-errors#exists--false).
+
+```solidity
+(IIfaPriceFeed.PriceFeed[] memory infos, bool[] memory exists) =
+    ORACLE.getAssetsInfo(assetIds);
+
+for (uint256 i = 0; i < assetIds.length; i++) {
+    if (!exists[i]) {
+        // Log assetIds[i] to identify the unsupported asset
+        revert UnsupportedAsset(assetIds[i]);
+    }
+}
+```
+
+---
+
+### `ProtocolIsPaused`
+
+**Type:** Custom error
+
+**When it fires:** Your protocol's auto-pause mechanism detected a stale or missing oracle feed and set `paused = true`. Subsequent calls to paused functions revert with this error until the guardian calls `resume()`.
+
+**Resolution:**
+
+<Steps>
+  <Step title="Identify which feed triggered the pause">
+    Check your `ProtocolPaused` event log — it includes the `assetId` that caused the pause and the reason (`"feed_stale"` or `"feed_missing"`).
+  </Step>
+  <Step title="Verify the feed has recovered">
+    Read `lastUpdateTime` for the affected asset and confirm it is within your staleness threshold.
+  </Step>
+  <Step title="Guardian calls resume()">
+    Once the feed is confirmed healthy, the guardian address calls `resume()` to unpause the protocol.
+  </Step>
+  <Step title="Review your staleness threshold">
+    If the pause was triggered by normal market inactivity rather than a genuine issue, consider widening the `MAX_PRICE_AGE` for the affected asset.
+  </Step>
+</Steps>
+
+---
+
+### `NotGuardian`
+
+**Type:** Custom error
+
+**When it fires:** A non-guardian address attempted to call a guardian-restricted function (`resume()`, `setMaxPriceAge()`, etc.).
+
+**Resolution:** Only the address set as `guardian` in your contract can call these functions. If the guardian address has changed — for example, a multisig migration — you need to update the guardian address through whatever access control mechanism your protocol uses.
+
+---
+
+## MCP Server Errors
+
+Errors returned by the IFÁ Labs MCP Server when tool calls fail.
+
+| Error Code | HTTP Equivalent | Description | Resolution |
+| --- | --- | --- | --- |
+| `asset_not_supported` | 404 | The requested asset symbol has no feed | Check `get_supported_assets` for the valid asset list |
+| `price_feed_stale` | 503 | The feed exists but exceeds `max_age_seconds` | Widen `max_age_seconds` or check for relayer issues |
+| `network_not_supported` | 400 | The `network` parameter is not a valid network name | Use: `base-mainnet`, `base-sepolia`, `assetchain-testnet` |
+| `rpc_connection_failed` | 503 | The server cannot connect to the RPC endpoint | Check `--rpc-url` configuration or switch providers |
+| `invalid_symbol_format` | 400 | The symbol string is malformed | Use uppercase with forward slash: `"USDT/USD"` |
+| `derived_pair_failed` | 503 | One or both underlying feeds are unavailable | Check both feeds individually with `check_price_freshness` |
+| `rate_limit_exceeded` | 429 | RPC provider rate limit hit | Switch to a dedicated RPC provider with `--rpc-url` |
+
+---
+
+## Error Selector Reference
+
+For advanced debugging — ABI-decoding revert data manually or matching errors in test assertions:
+
+| Error | Keccak256 Selector (bytes4) |
+| --- | --- |
+| `AssetNotSupported(bytes32)` | `cast sig "AssetNotSupported(bytes32)"` |
+| `InvalidAssetIndexLength(uint256,uint256)` | `cast sig "InvalidAssetIndexLength(uint256,uint256)"` |
+| `InvalidAssetOrDirectionLength(uint256,uint256,uint256)` | `cast sig "InvalidAssetOrDirectionLength(uint256,uint256,uint256)"` |
+
+<Note>
+  Run `cast sig "<ErrorSignature>"` from Foundry to compute the 4-byte selector for any error. Use these selectors with `vm.expectRevert(bytes4)` in Foundry tests or when decoding raw revert data in ethers.js.
+</Note>
+
+```bash
+# Compute selectors with cast
+cast sig "AssetNotSupported(bytes32)"
+# 0x...
+
+cast sig "InvalidAssetIndexLength(uint256,uint256)"
+# 0x...
+
+cast sig "InvalidAssetOrDirectionLength(uint256,uint256,uint256)"
+# 0x...
+```
+
+---
+
+## Foundry Test Patterns for Error Assertions
+
+```solidity
+contract ErrorTest is Test {
+    address constant ORACLE = 0xA9F17344689C2c2328F94464998db1d3e35B80dC;
+    IIfaPriceFeed oracle    = IIfaPriceFeed(ORACLE);
+
+    /// @notice Test that mismatched array lengths produce the correct error
+    function test_invalidArrayLength_revertsCorrectly() public {
+        bytes32[] memory assets0 = new bytes32[](2);
+        bytes32[] memory assets1 = new bytes32[](1); // wrong length
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IIfaPriceFeed.InvalidAssetIndexLength.selector,
+                2, // len0
+                1  // len1
+            )
+        );
+        oracle.getPairsbyIdForward(assets0, assets1);
+    }
+
+    /// @notice Test staleness check in your consuming contract
+    function test_stalePrice_revertsCorrectly() public {
+        // Warp past the staleness threshold
+        vm.warp(block.timestamp + 7200);
+
+        vm.expectRevert("IFA: price feed is stale");
+        myProtocol.executeWithPrice(USDT_ASSET_ID);
+    }
+
+    /// @notice Test that exists = false is handled correctly
+    function test_unsupportedAsset_handledCorrectly() public {
+        bytes32 fakeId = keccak256(abi.encodePacked("FAKE/USD"));
+
+        (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+            oracle.getAssetInfo(fakeId);
+
+        assertFalse(exists);
+        assertEq(info.price, 0);
+    }
+}
+```
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Price Appears Stale" icon="clock" href="/price-appears-stale">
+    Dedicated guide for diagnosing and resolving stale feed scenarios.
+  </Card>
+
+  <Card title="Common Integration Errors" icon="triangle-exclamation" href="/common-integration-errors">
+    Broader integration failure patterns and diagnosis scripts.
+  </Card>
+</CardGroup>

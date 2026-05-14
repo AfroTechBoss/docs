@@ -1,0 +1,78 @@
+---
+title: "Supported Chains & Roadmap"
+description: "Where IFÁ Labs is live today, what's coming next, and how multi-chain expansion is being approached."
+---
+
+IFÁ Labs is designed as a multi-chain oracle network from day one — not a single-chain product with ports bolted on later. The architecture is built to deploy consistently across EVM-compatible chains and non-EVM ecosystems like Solana, with identical asset IDs, aggregation logic, and security guarantees on every network.
+
+## Live Deployments
+
+| Network | Type | Contract Address | Explorer |
+| --- | --- | --- | --- |
+| **Base Mainnet** | EVM L2 — Production | `0xA9F17344689C2c2328F94464998db1d3e35B80dC` | [View on Basescan](https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC) |
+| **Base Sepolia** | EVM L2 — Testnet | `0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b` | [View on Basescan Sepolia](https://sepolia.basescan.org/address/0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b) |
+| **AssetChain Testnet** | EVM — Testnet | `0xBAc31e568883774A632275F9c8E7A5Bd117000F7` | [View on AssetChain Explorer](https://scan-testnet.assetchain.org/address/0xBAc31e568883774A632275F9c8E7A5Bd117000F7) |
+
+<Info>
+  Base Mainnet is the primary production deployment. If you're building for production, start here. Use Base Sepolia for all testing and development work before going live.
+</Info>
+
+## Why Base First?
+
+Base was selected as the primary deployment chain for three reasons:
+
+**Low fees.** Oracle price updates need to be pushed on-chain frequently. High gas costs on mainnet Ethereum would make that economically unsustainable at the update frequency stablecoins require. Base's L2 economics make continuous updates viable.
+
+**Fast finality.** Protocols consuming price feeds need confidence that an update is settled. Base's finality characteristics provide that without the latency of slower chains.
+
+**Ecosystem alignment.** Base has strong and growing DeFi activity, a developer-friendly environment, and direct alignment with the stablecoin and payments use cases IFÁ Labs serves — including native USDC support via Circle.
+
+## AssetChain Integration
+
+AssetChain is a blockchain infrastructure focused on real-world asset (RWA) tokenization. IFÁ Labs' integration here is deliberate — RWA protocols require reliable stablecoin pricing for collateral valuation, settlement, and on-chain accounting. AssetChain Mainnet deployment is targeted for when the ecosystem reaches full production readiness.
+
+## Roadmap
+
+| Milestone | Target | Details |
+| --- | --- | --- |
+| **AssetChain Mainnet** | TBD | Full production deployment for RWA-focused protocols |
+| **Solana** | TBD | Native Solana program with dedicated interface — different from EVM contracts |
+| **Additional EVM L2s** | TBD | Optimism, Arbitrum, Polygon zkEVM, and others based on ecosystem demand |
+| **Cross-Chain Messaging** | H2 2026 | Unified price propagation via LayerZero or Wormhole for instant cross-chain synchronization |
+| **Global View Contracts** | H2 2026 | Single-query endpoints returning consistent prices regardless of chain |
+
+<Note>
+  Timeline targets marked TBD are actively being scoped. Follow [@ifalabs](https://x.com/ifalabs) on X or join the [Telegram](https://t.me/ifalabs) for deployment announcements as they happen.
+</Note>
+
+## Cross-Chain Consistency Guarantee
+
+When IFÁ Labs deploys to a new chain, it doesn't spin up a separate product — it extends the same network. Specifically:
+
+- **Identical asset IDs** across every chain. The `bytes32` identifier for USDT/USD on Base is the same on AssetChain and will be the same on Solana. No remapping, no migration.
+- **Shared data sources and aggregation rules.** The same multi-source feeds, outlier detection, and consensus logic run on every deployment. Prices on different chains reflect the same underlying market reality.
+- **Synchronized update triggers.** Deviation and time-based thresholds are calibrated consistently, so price data across chains stays tightly aligned — typically within 0.1% variance under normal conditions.
+
+This matters for cross-chain protocols. If your application spans multiple chains and needs consistent stablecoin pricing across all of them, IFÁ Labs gives you that guarantee by design — not as an afterthought.
+
+## Requesting Chain Support
+
+Building on a chain that isn't listed? IFÁ Labs prioritizes deployments based on:
+
+- Volume of developer and protocol demand
+- Stablecoin activity and ecosystem maturity on the target chain
+- Technical feasibility and finality characteristics
+
+Reach out via [support@ifalabs.com](mailto:support@ifalabs.com) or open a request on [GitHub](https://github.com/IFA-Labs/oracle_contract/issues) with details about your chain and use case.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/prerequisites">
+    Get your first on-chain price from a live deployment in minutes.
+  </Card>
+
+  <Card title="Cross-Chain Price Consistency" icon="link" href="/across-chain-price-consistency">
+    Deep dive into how IFÁ Labs maintains pricing consistency across chains.
+  </Card>
+</CardGroup>

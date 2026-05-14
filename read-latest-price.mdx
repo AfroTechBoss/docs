@@ -1,0 +1,217 @@
+---
+title: "Read Latest Price"
+description: "Fetch live stablecoin prices from the IFÁ Labs oracle in your smart contracts — single assets, batch reads, and derived pairs."
+---
+
+With your contract configured and the interface installed, reading a price is a single view call. This page covers three reading patterns: single asset, batch, and derived pairs. Use whichever fits your protocol's needs — or combine them.
+
+---
+
+## Single Asset Price
+
+The most common pattern. Call `getAssetInfo` with a `bytes32` asset ID and read the returned `PriceFeed` struct.
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "ifapricefeed-interface/IIfaPriceFeed.sol";
+
+contract PriceConsumer {
+    IIfaPriceFeed public constant ORACLE =
+        IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC); // Base Mainnet
+
+    bytes32 public constant USDT_ASSET_ID =
+        0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d;
+
+    function getUSDTPrice()
+        external
+        view
+        returns (
+            int256  price,
+            int8    decimal,
+            uint256 lastUpdateTime
+        )
+    {
+        (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+            ORACLE.getAssetInfo(USDT_ASSET_ID);
+
+        require(exists, "IFA: asset not supported");
+
+        return (info.price, info.decimal, info.lastUpdateTime);
+    }
+}
+```
+
+**What each field means:**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `price` | `int256` | Scaled price value. Divide by `10^(-decimal)` to get the human-readable price. |
+| `decimal` | `int8` | Negative scaling exponent. Stablecoin feeds use `-18` — meaning divide by `1e18`. |
+| `lastUpdateTime` | `uint256` | Unix timestamp of the last on-chain update from the relayer network. |
+
+**Converting to a human-readable price:**
+
+```solidity
+// For a fixed -18 decimal (all current stablecoin feeds)
+uint256 humanPrice = uint256(info.price) / 1e18;
+
+// For dynamic decimal handling (future-proof)
+uint256 humanPrice = uint256(info.price) / (10 ** uint8(-info.decimal));
+```
+
+For a USDT feed at peg, expect `info.price` ≈ `1000000000000000000` (`1e18`) and `info.decimal` = `-18`, giving a human-readable price of `$1.00`.
+
+---
+
+## Batch Price Read
+
+If your protocol needs multiple prices in the same transaction — for example, valuing a multi-asset collateral basket — use `getAssetsInfo`. One external call is always cheaper than multiple individual calls.
+
+```solidity
+bytes32[] memory assetIds = new bytes32[](3);
+assetIds[0] = USDT_ASSET_ID;
+assetIds[1] = USDC_ASSET_ID;
+assetIds[2] = CNGN_ASSET_ID;
+
+(IIfaPriceFeed.PriceFeed[] memory infos, bool[] memory exists) =
+    ORACLE.getAssetsInfo(assetIds);
+
+for (uint256 i = 0; i < assetIds.length; i++) {
+    require(exists[i], "IFA: unsupported asset in batch");
+    // Process infos[i].price, infos[i].decimal, infos[i].lastUpdateTime
+}
+```
+
+<Tip>
+  The `exists` array is returned in the same order as the input `assetIds` array. Always check `exists[i]` before using `infos[i]` — a `false` value means that asset has no data and the corresponding `PriceFeed` fields will be zero.
+</Tip>
+
+---
+
+## Derived Pair Prices
+
+Derived pairs let you price one supported asset directly against another — for example, CNGN priced in USDT terms, or BRZ priced in USDC terms — without requiring a dedicated feed for every possible combination.
+
+IFÁ Labs computes derived prices on-chain using the two underlying USD feeds as intermediates.
+
+### Single Derived Pair
+
+```solidity
+// Price CNGN in terms of USDT (how much USDT is one CNGN worth?)
+IIfaPriceFeed.DerivedPair memory pair = ORACLE.getPairbyId(
+    CNGN_ASSET_ID,   // asset0 — the asset being priced
+    USDT_ASSET_ID,   // asset1 — the denominator
+    IIfaPriceFeed.PairDirection.Forward
+);
+```
+
+### Batch Derived Pairs
+
+For protocols working across multiple cross-asset pairs:
+
+```solidity
+bytes32[] memory assets0 = new bytes32[](2);
+bytes32[] memory assets1 = new bytes32[](2);
+
+assets0[0] = CNGN_ASSET_ID;
+assets1[0] = USDT_ASSET_ID;
+
+assets0[1] = BRZ_ASSET_ID;
+assets1[1] = USDC_ASSET_ID;
+
+// Forward direction — asset0 priced in asset1 terms
+IIfaPriceFeed.DerivedPair[] memory pairs =
+    ORACLE.getPairsbyIdForward(assets0, assets1);
+```
+
+### Understanding PairDirection
+
+| Direction | Meaning | Use Case |
+| --- | --- | --- |
+| `Forward` | asset0 priced in asset1 terms | "How much USDT is one CNGN worth?" |
+| `Backward` | asset1 priced in asset0 terms | "How much CNGN is one USDT worth?" |
+
+<Note>
+  Derived pairs require both assets to have active, non-stale USD feeds. If either underlying feed is stale or missing, the derived pair calculation will revert. Always ensure both feeds are healthy before calling derived pair functions in critical paths.
+</Note>
+
+---
+
+## Reading Prices Off-Chain
+
+For backend services, scripts, or frontend applications reading prices without executing a transaction:
+
+```javascript
+const { ethers } = require("ethers");
+
+const ORACLE_ADDRESS = "0xA9F17344689C2c2328F94464998db1d3e35B80dC";
+const provider = new ethers.JsonRpcProvider("https://mainnet.base.org");
+
+const ABI = [
+  `function getAssetInfo(bytes32 assetId)
+      view returns (
+          (int256 price, int8 decimal, uint256 lastUpdateTime) assetInfo,
+          bool exists
+      )`,
+  `function getAssetsInfo(bytes32[] assetIds)
+      view returns (
+          (int256 price, int8 decimal, uint256 lastUpdateTime)[] infos,
+          bool[] exists
+      )`
+];
+
+const oracle = new ethers.Contract(ORACLE_ADDRESS, ABI, provider);
+
+async function readPrice(assetId) {
+    const [info, exists] = await oracle.getAssetInfo(assetId);
+
+    if (!exists) throw new Error("Asset not supported");
+
+    const price = Number(info.price) / 10 ** Number(-info.decimal);
+    const ageSeconds = Math.floor(Date.now() / 1000) - Number(info.lastUpdateTime);
+
+    return {
+        price:       price.toFixed(6),
+        decimal:     Number(info.decimal),
+        ageSeconds,
+        rawPrice:    info.price.toString(),
+    };
+}
+
+// Single read
+const usdt = await readPrice(
+    "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d"
+);
+console.log(usdt);
+// { price: '1.000124', decimal: -18, ageSeconds: 412, rawPrice: '1000124000000000000' }
+```
+
+---
+
+## Common Mistakes
+
+These are the mistakes developers make most often when first reading from the oracle. All of them are avoidable.
+
+**Not checking `exists` before using the price.** If `exists` is `false`, `info.price` is `0`. Using that value without checking will silently execute your logic against a zero price.
+
+**Forgetting to apply the decimal scaling.** `info.price` is not a dollar amount — it's a scaled integer. `1000000000000000000` is `$1.00`, not one quintillion dollars. Always divide by `10^(-decimal)` before using the value in human-facing output or fixed-point math.
+
+**Casting `int256` to `uint256` without checking sign.** Current stablecoin feeds always return positive prices, but the type is `int256`. Cast safely: only cast after confirming `info.price > 0`, or use `uint256(info.price)` with the understanding that negative values would underflow.
+
+**Using the price without a staleness check.** A returned price with `exists = true` is not automatically fresh. Always pair your read with a `lastUpdateTime` check before using the value in any logic with financial consequences. See [Verify Price Integrity](/verify-price-integrity).
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Handle Stale Data" icon="clock" href="/handle-stale-data">
+    Implement staleness guards and graceful degradation patterns.
+  </Card>
+
+  <Card title="Gas Optimization Tips" icon="gauge" href="/gas-optimization-tips">
+    Reduce the gas footprint of your oracle integration.
+  </Card>
+</CardGroup>

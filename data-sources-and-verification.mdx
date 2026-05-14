@@ -1,0 +1,211 @@
+---
+title: "Data Sources & Verification"
+description: "How IFÁ Labs selects, weights, and verifies data sources — and why source quality is the foundation of reliable stablecoin pricing."
+---
+
+The quality of an oracle's output is bounded by the quality of its inputs. No aggregation algorithm, however sophisticated, can produce reliable prices from unreliable sources. This page documents how IFÁ Labs selects data sources, how they are weighted, and what verification layers ensure only valid data reaches the aggregation pipeline.
+
+---
+
+## Source Selection Principles
+
+IFÁ Labs applies strict criteria when evaluating and onboarding data sources. A source must satisfy all of the following before it is integrated:
+
+**Liquidity depth.** Sources must demonstrate sustained trading volume and order book depth for the target asset. Thin markets are susceptible to price manipulation through small trades and produce noisy data that degrades aggregation quality.
+
+**Independence.** Sources must be genuinely independent — separate legal entities, separate infrastructure, separate data pipelines. Two exchanges owned by the same parent company or sharing a price feed are treated as a single source. Correlated sources provide false confidence in consensus.
+
+**Historical reliability.** Sources are evaluated against their track record of uptime, API stability, and price accuracy over a meaningful historical window before integration. A source that goes offline frequently or has a history of stale API responses is not integrated regardless of its liquidity depth.
+
+**Geographic and market relevance.** For emerging market stablecoins, sources must have direct exposure to the relevant local market. A global CEX with shallow cNGN liquidity and no Nigerian market presence is a lower-quality source for CNGN/USD than a regional exchange with deep local liquidity — regardless of the global CEX's overall size.
+
+**Transparency.** Sources must provide verifiable, timestamped data. Anonymous or unverifiable feeds are not integrated.
+
+---
+
+## Source Categories
+
+### Centralized Exchanges (CEXs)
+
+Major global trading platforms with deep order books for USDT and USDC. CEXs provide high-frequency, high-confidence reference prices for global stablecoins with large international trading volumes.
+
+**Weight in aggregation:** High for global stablecoins. Moderate for emerging market stablecoins where CEX liquidity is thinner than regional alternatives.
+
+**Monitoring:** CEX API health is monitored continuously. Sources that go offline, return stale timestamps, or report anomalous prices are automatically downweighted or excluded for the affected aggregation rounds.
+
+---
+
+### Decentralized Exchanges (DEXs)
+
+On-chain AMM pools provide transparent, verifiable pricing that can be independently audited by anyone. DEX prices are derived from pool reserves and are resistant to off-chain data manipulation.
+
+**Weight in aggregation:** Moderate. DEX prices are valuable for cross-validation but can be influenced by low liquidity in smaller pools and are subject to sandwich attacks in thin markets.
+
+**Filtering applied:** Only pools above a minimum liquidity threshold are included. Prices derived from pools with insufficient liquidity are excluded regardless of the DEX's overall reputation.
+
+---
+
+### Forex and Fiat Providers
+
+Institutional foreign exchange data feeds and fiat on-ramp providers supply the fiat-to-stablecoin conversion rates that underpin accurate pricing for local stablecoins.
+
+For a stablecoin like cNGN — pegged to the Nigerian naira — the relevant reference is the NGN/USD exchange rate in the Nigerian market, not a synthetic rate derived from global crypto markets. IFÁ Labs integrates institutional forex providers with direct exposure to the relevant local currency markets.
+
+**Weight in aggregation:** High for emerging market stablecoins. The most geographically relevant forex source for a given asset receives elevated weight.
+
+---
+
+### Regional Exchanges
+
+Local and regional trading platforms operating in the markets where emerging market stablecoins are actively used. These exchanges reflect ground-truth pricing that global platforms may lag by hours during periods of local market stress.
+
+**Examples of relevance:**
+
+- Nigerian P2P and local exchange rates for CNGN
+- South African crypto exchange rates for ZARP
+- Brazilian exchange and fiat gateway rates for BRZ
+
+**Weight in aggregation:** High for the relevant asset's home market. Regional sources for CNGN receive elevated weight in CNGN/USD aggregation — reflecting the principle that local market reality should dominate local asset pricing.
+
+---
+
+## Verification Layers
+
+Source data passes through multiple verification layers before reaching the aggregation stage. A data point that fails any layer is discarded for that round.
+
+### Layer 1: Source-Level Validation
+
+Applied to each individual data point as it arrives:
+
+```text
+Checks performed:
+  ✓ Timestamp is within the current aggregation window
+  ✓ Price value is positive and non-zero
+  ✓ Volume meets the minimum threshold for this source
+  ✓ API response is complete and well-formed
+  ✓ Source is not flagged as degraded or offline
+```
+
+Data points failing any of these checks are discarded before they enter the pipeline. A single bad data point from one source does not affect other sources or the aggregation result.
+
+### Layer 2: Cross-Source Consistency Check
+
+After individual validation, data points are evaluated against each other:
+
+```text
+Checks performed:
+  ✓ Price deviation from preliminary median is within threshold
+  ✓ Source agrees with at least N other independent sources
+     within a configured tolerance band
+  ✓ No single source deviates by more than the absolute
+     manipulation threshold for this asset
+```
+
+This layer catches coordinated manipulation attempts — where multiple sources from the same underlying infrastructure report a correlated anomalous price — by requiring genuine cross-source agreement.
+
+### Layer 3: Historical Consistency Check
+
+The aggregated price candidate is compared against recent historical values:
+
+```text
+Checks performed:
+  ✓ Price change from last on-chain value is within
+     the expected range for the time elapsed
+  ✓ Rate of change is consistent with observed market dynamics
+     for this asset class
+  ✓ No sudden jump inconsistent with known market events
+```
+
+This layer is particularly important for stablecoins. A USDT price of $0.97 after trading at $1.00 for months is either a genuine depeg event or data corruption — the historical check flags it for human review rather than allowing automatic submission.
+
+### Layer 4: Minimum Source Threshold
+
+Before the aggregated price can be submitted on-chain, the number of valid sources contributing to it must meet a minimum threshold:
+
+```text
+Required: N independent sources must pass Layers 1–3
+          before submission proceeds.
+
+If fewer than N sources are available:
+  → Submission is withheld
+  → Existing on-chain price remains unchanged
+  → Alert is raised for investigation
+```
+
+This ensures no price update is ever submitted based on a single source or an insufficiently diversified data set — even if the available data passes all other checks.
+
+---
+
+## Source Weighting Model
+
+Not all sources contribute equally to the final aggregated price. IFÁ Labs assigns weights dynamically per aggregation round based on:
+
+| Factor | Description | Effect on Weight |
+| --- | --- | --- |
+| **Liquidity depth** | Order book depth and recent trading volume | Higher volume → higher weight |
+| **Historical accuracy** | Track record of price accuracy vs. eventual consensus | More accurate history → higher weight |
+| **Uptime reliability** | Frequency of outages and API failures | Higher uptime → higher weight |
+| **Geographic relevance** | Proximity to the asset's home market | More relevant geography → higher weight for emerging market assets |
+| **Data freshness** | Age of the data point within the aggregation window | More recent → higher weight |
+
+Weights are recalculated per round — a source that was reliable yesterday but is showing degraded performance today receives a reduced weight for today's aggregations without requiring manual intervention.
+
+---
+
+## Monitoring and Source Health
+
+Source health is monitored continuously between aggregation rounds. The monitoring system tracks:
+
+**API latency and uptime.** Sources exceeding response time thresholds or showing elevated error rates are automatically downweighted. Persistent failures trigger removal from the active source set pending investigation.
+
+**Price drift relative to consensus.** Sources that consistently report prices diverging from the consensus — even within acceptable bounds — are flagged for review. Persistent systematic bias in a source's reported prices is a signal of either data quality issues or manipulation.
+
+**Volume anomalies.** Sudden drops in trading volume at a source can signal exchange problems, liquidity withdrawal, or manipulation attempts. Volume below minimum thresholds triggers automatic exclusion for affected rounds.
+
+---
+
+## Adding New Sources
+
+IFÁ Labs continuously evaluates new data sources as the stablecoin ecosystem expands — particularly in emerging markets where new regional exchanges and fiat gateways launch regularly.
+
+Source addition follows a structured evaluation process:
+
+<Steps>
+  <Step title="Initial evaluation">
+    The candidate source is assessed against the selection criteria — liquidity depth, independence, reliability history, geographic relevance, and transparency.
+  </Step>
+  <Step title="Shadow mode integration">
+    The source is integrated in shadow mode — its data is collected and processed through the full pipeline, but it does not contribute to the final aggregated price. Shadow mode results are compared against live aggregations to evaluate accuracy.
+  </Step>
+  <Step title="Weight calibration">
+    Based on shadow mode performance, an initial weight is assigned. The weight reflects the source's demonstrated accuracy relative to consensus during the shadow period.
+  </Step>
+  <Step title="Live integration">
+    The source is promoted to the live aggregation set with its calibrated weight. Performance continues to be monitored and the weight is adjusted dynamically based on ongoing accuracy.
+  </Step>
+</Steps>
+
+---
+
+## Requesting Source Integration
+
+If you operate or know of a regional exchange, forex provider, or fiat gateway with direct exposure to an emerging market stablecoin that IFÁ Labs does not currently integrate, reach out:
+
+- **Email:** [support@ifalabs.com](mailto:support@ifalabs.com)
+- **Telegram:** [t.me/ifalabs](https://t.me/ifalabs)
+
+Include the source's name, URL, supported assets, average daily volume, and API documentation. Sources serving emerging markets — particularly Africa, Latin America, and Southeast Asia — are prioritised for evaluation.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Update Triggers" icon="clock" href="/update-triggers-deviation-time">
+    Understand when and why price updates are pushed on-chain.
+  </Card>
+
+  <Card title="Decimal Precision & Formatting" icon="hashtag" href="/decimal-precision-and-formatting">
+    Learn how IFÁ Labs scales and formats price data for on-chain storage.
+  </Card>
+</CardGroup>

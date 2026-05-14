@@ -1,0 +1,241 @@
+---
+title: "Supported Assets"
+description: "Complete reference for all IFÁ Labs price feeds — asset IDs, categories, network availability, and how to request new feeds."
+---
+
+This page is the authoritative reference for every price feed currently supported by IFÁ Labs. All feeds are USD-denominated, use consistent asset IDs across every supported network, and are updated using the hybrid deviation \+ heartbeat trigger model documented in [Update Triggers](/update-triggers-deviation-time).
+
+---
+
+## Current Price Feeds
+
+| Asset | Symbol | Category | Decimal | Asset ID (bytes32) |
+| --- | --- | --- | --- | --- |
+| **Tether** | USDT/USD | Global | -18 | `0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d` |
+| **USD Coin** | USDC/USD | Global | -18 | `0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d` |
+| **Nigerian Naira Stablecoin** | CNGN/USD | Emerging Market | -18 | `0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a` |
+| **South African Rand Stablecoin** | ZARP/USD | Emerging Market | -18 | `0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8` |
+| **Brazilian Real Stablecoin** | BRZ/USD | Emerging Market | -18 | `0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5` |
+| **Ethereum** | ETH/USD | Reference Asset | -18 | `0x8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0` |
+
+<Info>
+  ETH/USD is included as a reference asset to enable derived pair calculations between stablecoins and ETH. IFÁ Labs is stablecoin-first — ETH is not a primary feed target.
+</Info>
+
+---
+
+## Feed Configuration
+
+Each asset is configured with independent update triggers calibrated to its market behaviour:
+
+| Asset | Deviation Threshold | Heartbeat | Recommended MAX\_PRICE\_AGE |
+| --- | --- | --- | --: |
+| USDT/USD | 0.1% | 1 hour | 5,400s (90 min) |
+| USDC/USD | 0.1% | 1 hour | 5,400s (90 min) |
+| CNGN/USD | 0.3% | 2 hours | 10,800s (3 hrs) |
+| ZARP/USD | 0.3% | 2 hours | 10,800s (3 hrs) |
+| BRZ/USD | 0.3% | 2 hours | 10,800s (3 hrs) |
+| ETH/USD | 0.5% | 1 hour | 5,400s (90 min) |
+
+The `Recommended MAX_PRICE_AGE` is 1.5× the heartbeat interval — the minimum safe staleness threshold accounting for heartbeat jitter. See [Update Triggers](/update-triggers-deviation-time) for a full explanation of the trigger model.
+
+---
+
+## Network Availability
+
+All feeds are available on every currently supported network. Asset IDs are identical across networks — only the contract address changes.
+
+| Network | Status | Contract Address |
+| --- | --- | --- |
+| **Base Mainnet** | Live | `0xA9F17344689C2c2328F94464998db1d3e35B80dC` |
+| **Base Sepolia** | Testnet | `0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b` |
+| **AssetChain Testnet** | Testnet | `0xBAc31e568883774A632275F9c8E7A5Bd117000F7` |
+
+---
+
+## Asset ID Generation
+
+Every asset ID is deterministically generated from its symbol string using `keccak256`:
+
+```solidity
+bytes32 assetId = keccak256(abi.encodePacked("USDT/USD"));
+```
+
+**Symbol string format:** uppercase, forward slash separator, `/USD` suffix. Case-sensitive — `"usdt/usd"` produces a different hash and returns `exists = false`.
+
+Verify any asset ID independently:
+
+```javascript
+const { ethers } = require("ethers");
+
+const assets = [
+  "USDT/USD",
+  "USDC/USD",
+  "CNGN/USD",
+  "ZARP/USD",
+  "BRZ/USD",
+  "ETH/USD",
+];
+
+assets.forEach(symbol => {
+  const id = ethers.keccak256(ethers.toUtf8Bytes(symbol));
+  console.log(`${symbol}: ${id}`);
+});
+```
+
+---
+
+## Solidity Constants
+
+Copy-paste ready constants for every supported asset:
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+/// @notice IFÁ Labs asset ID constants
+/// @dev Generated via keccak256(abi.encodePacked("SYMBOL/USD"))
+///      Identical across all supported networks
+
+// Global stablecoins
+bytes32 public constant USDT_ASSET_ID =
+    0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d;
+
+bytes32 public constant USDC_ASSET_ID =
+    0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d;
+
+// Emerging market stablecoins
+bytes32 public constant CNGN_ASSET_ID =
+    0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a;
+
+bytes32 public constant ZARP_ASSET_ID =
+    0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8;
+
+bytes32 public constant BRZ_ASSET_ID =
+    0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5;
+
+// Reference asset
+bytes32 public constant ETH_ASSET_ID =
+    0x8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0;
+```
+
+---
+
+## JavaScript / TypeScript Constants
+
+```typescript
+export const IFA_ASSET_IDS = {
+  "USDT/USD": "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d",
+  "USDC/USD": "0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d",
+  "CNGN/USD": "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a",
+  "ZARP/USD": "0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8",
+  "BRZ/USD":  "0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5",
+  "ETH/USD":  "0x8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0",
+} as const;
+
+export const IFA_MAX_PRICE_AGE: Record<keyof typeof IFA_ASSET_IDS, number> = {
+  "USDT/USD": 5400,
+  "USDC/USD": 5400,
+  "CNGN/USD": 10800,
+  "ZARP/USD": 10800,
+  "BRZ/USD":  10800,
+  "ETH/USD":  5400,
+};
+```
+
+---
+
+## Python Constants
+
+```python
+IFA_ASSET_IDS = {
+    "USDT/USD": "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d",
+    "USDC/USD": "0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d",
+    "CNGN/USD": "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a",
+    "ZARP/USD": "0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8",
+    "BRZ/USD":  "0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5",
+    "ETH/USD":  "0x8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0",
+}
+
+IFA_MAX_PRICE_AGE = {
+    "USDT/USD": 5400,
+    "USDC/USD": 5400,
+    "CNGN/USD": 10800,
+    "ZARP/USD": 10800,
+    "BRZ/USD":  10800,
+    "ETH/USD":  5400,
+}
+
+# Convert hex strings to bytes for web3.py
+IFA_ASSET_IDS_BYTES = {
+    symbol: bytes.fromhex(asset_id[2:])
+    for symbol, asset_id in IFA_ASSET_IDS.items()
+}
+```
+
+---
+
+## Derived Pair Support
+
+Any two supported assets can be priced against each other using the oracle's derived pair functions — without requiring a dedicated feed for every possible combination.
+
+**Examples of available derived pairs:**
+
+| Pair | Description | Function |
+| --- | --- | --- |
+| CNGN/USDT | Nigerian naira stablecoin priced in USDT | `getPairbyId(CNGN, USDT, Forward)` |
+| ZARP/USDC | South African rand stablecoin priced in USDC | `getPairbyId(ZARP, USDC, Forward)` |
+| BRZ/USDT | Brazilian real stablecoin priced in USDT | `getPairbyId(BRZ, USDT, Forward)` |
+| USDT/CNGN | USDT priced in CNGN terms | `getPairbyId(CNGN, USDT, Backward)` |
+| ETH/USDC | ETH priced in USDC terms | `getPairbyId(ETH, USDC, Forward)` |
+
+Any combination of the six supported assets is computable as a derived pair. See [Function Reference](/function-reference) for the full derived pair API.
+
+---
+
+## Requesting New Feeds
+
+IFÁ Labs adds new assets on a rolling basis based on ecosystem demand. Priority is given to:
+
+- Stablecoins with verified, transparent backing
+- Assets with demonstrated on-chain or real-world adoption
+- Emerging market stablecoins in Africa, Latin America, and Southeast Asia
+- Assets requested by active protocol integrations
+
+**To request a new feed:**
+
+<CardGroup cols={3}>
+  <Card title="Email" icon="envelope" href="mailto:support@ifalabs.com">
+    [support@ifalabs.com](mailto:support@ifalabs.com) — include token contract, backing proof, and use case
+  </Card>
+
+  <Card title="Telegram" icon="message" href="https://t.me/ifalabs">
+    t.me/ifalabs — fastest response for quick questions
+  </Card>
+
+  <Card title="GitHub" icon="github" href="https://github.com/IFA-Labs/oracle_contract/issues">
+    Open a feed request issue with full details
+  </Card>
+</CardGroup>
+
+When submitting a request, include:
+
+- Token contract address on all relevant chains
+- Backing mechanism and reserve proof
+- Current daily trading volume across all venues
+- The protocol or use case driving the request
+- Any existing oracle coverage on other networks
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Network Information" icon="network-wired" href="/network-information">
+    RPC endpoints, chain IDs, and block explorer links for all supported networks.
+  </Card>
+
+  <Card title="Working with Asset IDs" icon="fingerprint" href="/working-with-asset-ids">
+    How asset IDs are generated, verified, and used in contracts.
+  </Card>
+</CardGroup>

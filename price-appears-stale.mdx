@@ -1,0 +1,345 @@
+---
+title: "Price Appears Stale"
+---
+
+Staleness is the most common issue developers encounter when integrating oracle price feeds. It is also the most frequently misdiagnosed. Before changing any code, work through this guide to confirm you are dealing with genuine staleness — and not a threshold configuration problem or a misunderstanding of how IFÁ Labs update triggers work.
+
+---
+
+## Is This Actually a Problem?
+
+The first question to answer is whether the staleness you are observing represents a real issue or expected oracle behaviour.
+
+IFÁ Labs uses a hybrid deviation \+ heartbeat trigger model. During periods of market stability — when a stablecoin is sitting tightly at its peg — updates are intentionally infrequent. The oracle is working correctly. It simply has nothing meaningful to report.
+
+```text
+Is the feed age within 1.5× the heartbeat interval for this asset?
+
+  USDT/USD  heartbeat: 1 hour  → within 90 minutes  → EXPECTED
+  USDC/USD  heartbeat: 1 hour  → within 90 minutes  → EXPECTED
+  CNGN/USD  heartbeat: 2 hours → within 3 hours     → EXPECTED
+  ZARP/USD  heartbeat: 2 hours → within 3 hours     → EXPECTED
+  BRZ/USD   heartbeat: 2 hours → within 3 hours     → EXPECTED
+  ETH/USD   heartbeat: 1 hour  → within 90 minutes  → EXPECTED
+
+If YES → Your MAX_PRICE_AGE is too tight. Widen it.
+If NO  → Continue diagnosing below.
+```
+
+---
+
+## Step 1: Measure the Actual Feed Age
+
+Before anything else, read the current feed state directly from the oracle:
+
+```javascript
+const { ethers } = require("ethers");
+
+const ORACLE_ADDRESS = "0xA9F17344689C2c2328F94464998db1d3e35B80dC";
+const provider       = new ethers.JsonRpcProvider("https://mainnet.base.org");
+const oracle         = new ethers.Contract(ORACLE_ADDRESS, [
+  "function getAssetsInfo(bytes32[]) view returns ((int256 price, int8 decimal, uint256 lastUpdateTime)[], bool[])"
+], provider);
+
+const ASSETS = {
+  "USDT/USD": "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d",
+  "USDC/USD": "0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d",
+  "CNGN/USD": "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a",
+  "ZARP/USD": "0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8",
+  "BRZ/USD":  "0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5",
+  "ETH/USD":  "0x8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0",
+};
+
+const HEARTBEATS = {
+  "USDT/USD": 3600,
+  "USDC/USD": 3600,
+  "CNGN/USD": 7200,
+  "ZARP/USD": 7200,
+  "BRZ/USD":  7200,
+  "ETH/USD":  3600,
+};
+
+async function measureFeedAge() {
+  const symbols  = Object.keys(ASSETS);
+  const assetIds = Object.values(ASSETS);
+  const now      = Math.floor(Date.now() / 1000);
+
+  const [infos, exists] = await oracle.getAssetsInfo(assetIds);
+
+  console.log("Feed Age Report — Base Mainnet");
+  console.log("═".repeat(70));
+
+  symbols.forEach((symbol, i) => {
+    if (!exists[i]) {
+      console.log(`${symbol}: NOT SUPPORTED`);
+      return;
+    }
+
+    const age        = now - Number(infos[i].lastUpdateTime);
+    const heartbeat  = HEARTBEATS[symbol];
+    const lastUpdate = new Date(Number(infos[i].lastUpdateTime) * 1000).toISOString();
+    const price      = Number(infos[i].price) / 1e18;
+    const ratio      = (age / heartbeat * 100).toFixed(0);
+
+    const status =
+      age <= heartbeat       ? "✓ Fresh (within heartbeat)"       :
+      age <= heartbeat * 1.5 ? "⚠ Approaching — widen threshold" :
+      age <= heartbeat * 3   ? "⚠ Stale — investigate"           :
+                               "🔴 Very stale — report immediately";
+
+    console.log(`\n${symbol}`);
+    console.log(`  Price:       $${price.toFixed(6)}`);
+    console.log(`  Last update: ${lastUpdate}`);
+    console.log(`  Age:         ${age}s (${(age / 60).toFixed(1)} min) — ${ratio}% of heartbeat`);
+    console.log(`  Status:      ${status}`);
+  });
+}
+
+measureFeedAge();
+```
+
+---
+
+## Step 2: Identify the Staleness Pattern
+
+After measuring feed ages, identify which of the following patterns matches your situation:
+
+### Pattern A — Single Feed Stale, Others Fresh
+
+One asset's feed is significantly older than the others.
+
+**Likely cause:** Asset-specific issue — low market activity reducing deviation triggers, or a source-specific problem affecting only that asset's aggregation pipeline.
+
+**Actions:**
+
+1. Check the asset's `PriceUpdated` event history on Basescan to see the recent update cadence
+2. Compare the on-chain price against external market sources — if the price looks accurate, the oracle is simply in a low-deviation period
+3. If the price looks wrong or the feed is older than 2× the heartbeat, report it to [support@ifalabs.com](mailto:support@ifalabs.com)
+
+---
+
+### Pattern B — All Feeds Stale Simultaneously
+
+Every asset on the network has a similar age, all significantly past their heartbeat intervals.
+
+**Likely cause:** Relayer issue affecting the entire deployment on that network — not asset-specific.
+
+**Actions:**
+
+1. Check the [IFÁ Labs Telegram](https://t.me/ifalabs) for any incident announcements
+2. Check [Basescan](https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC#events) for the most recent `PriceUpdated` event across all assets
+3. If no incident is announced and feeds have been stale for more than 2 hours, report immediately to [support@ifalabs.com](mailto:support@ifalabs.com)
+
+---
+
+### Pattern C — Feed Is Stale Only by Your Threshold
+
+The feed age is within 1.5–2× the heartbeat interval but exceeding your `MAX_PRICE_AGE`.
+
+**Cause:** Your staleness threshold is tighter than the asset's natural update cadence.
+
+**Fix:** Widen your `MAX_PRICE_AGE` to at least 1.5× the heartbeat interval for each asset:
+
+```solidity
+// Before — too tight, causes false staleness reverts
+uint256 public constant MAX_PRICE_AGE = 3600; // Matches heartbeat exactly — no buffer
+
+// After — calibrated with jitter buffer
+mapping(bytes32 => uint256) public maxPriceAge;
+
+constructor() {
+    // 1.5× heartbeat for global stablecoins
+    maxPriceAge[USDT_ASSET_ID] = 5400;   // 90 minutes
+    maxPriceAge[USDC_ASSET_ID] = 5400;   // 90 minutes
+    maxPriceAge[ETH_ASSET_ID]  = 5400;   // 90 minutes
+
+    // 1.5× heartbeat for emerging market stablecoins
+    maxPriceAge[CNGN_ASSET_ID] = 10800;  // 3 hours
+    maxPriceAge[ZARP_ASSET_ID] = 10800;  // 3 hours
+    maxPriceAge[BRZ_ASSET_ID]  = 10800;  // 3 hours
+}
+```
+
+---
+
+### Pattern D — Testnet Feed Is Stale
+
+You are testing against Base Sepolia or AssetChain Testnet and the feed is very old.
+
+**Cause:** Testnet relayers are less active than mainnet. During low-traffic periods, testnet feeds may not update for several hours or longer.
+
+**Actions:**
+
+1. Use significantly wider staleness thresholds on testnet — `86400` (24 hours) is reasonable for development
+2. For integration testing against realistic update cadence, test against Base Mainnet with a read-only setup — no transactions required for price reads
+3. Never use testnet staleness behaviour to calibrate mainnet thresholds
+
+---
+
+## Step 3: Check the Update History
+
+For any feed showing unexpected staleness, inspect the historical update cadence on Basescan:
+
+<Steps>
+  <Step title="Open the Events tab">
+    Navigate to the oracle contract on Basescan and click **Events**: [basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC#events](https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC#events)
+  </Step>
+  <Step title="Filter by asset ID">
+    Use the Topic 1 filter to show only events for the specific asset you are investigating. Enter the `bytes32` asset ID as the filter value.
+  </Step>
+  <Step title="Review recent update timestamps">
+    Look at the timestamps of the last 5–10 updates. Calculate the intervals between them. This is the actual observed update cadence for this asset — use it to calibrate your `MAX_PRICE_AGE`.
+  </Step>
+  <Step title="Identify the longest gap">
+    The longest observed interval between updates is the value to build your staleness threshold around. Set `MAX_PRICE_AGE` to 1.5× this value for a safe buffer.
+  </Step>
+</Steps>
+
+Or programmatically:
+
+```javascript
+async function analyzeUpdateCadence(assetId, symbol, lookbackBlocks = 100000) {
+  const provider = new ethers.JsonRpcProvider("https://mainnet.base.org");
+  const oracle   = new ethers.Contract(
+    "0xA9F17344689C2c2328F94464998db1d3e35B80dC",
+    ["event PriceUpdated(bytes32 indexed assetId, int256 price, int8 decimal, uint64 timestamp)"],
+    provider
+  );
+
+  const currentBlock = await provider.getBlockNumber();
+  const events       = await oracle.queryFilter(
+    oracle.filters.PriceUpdated(assetId),
+    currentBlock - lookbackBlocks,
+    currentBlock
+  );
+
+  if (events.length < 2) {
+    console.log(`${symbol}: Insufficient history (${events.length} events in last ${lookbackBlocks} blocks)`);
+    return;
+  }
+
+  const intervals = [];
+  for (let i = 1; i < events.length; i++) {
+    intervals.push(
+      Number(events[i].args.timestamp) - Number(events[i - 1].args.timestamp)
+    );
+  }
+
+  const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+  const max = Math.max(...intervals);
+  const min = Math.min(...intervals);
+  const p95 = intervals.sort((a, b) => a - b)[Math.floor(intervals.length * 0.95)];
+
+  console.log(`\n${symbol} — Update Cadence Analysis`);
+  console.log(`  Events analysed:       ${events.length}`);
+  console.log(`  Average interval:      ${Math.round(avg)}s (${(avg / 60).toFixed(1)} min)`);
+  console.log(`  Shortest interval:     ${min}s (${(min / 60).toFixed(1)} min)`);
+  console.log(`  Longest interval:      ${max}s (${(max / 60).toFixed(1)} min)`);
+  console.log(`  95th percentile:       ${p95}s (${(p95 / 60).toFixed(1)} min)`);
+  console.log(`\n  Recommended MAX_PRICE_AGE: ${Math.round(max * 1.5)}s`);
+  console.log(`  Conservative (2×max):      ${max * 2}s`);
+}
+
+analyzeUpdateCadence(
+  "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a",
+  "CNGN/USD"
+);
+```
+
+---
+
+## Step 4: Protocol Response to Genuine Staleness
+
+If the feed is genuinely stale — beyond the expected heartbeat interval with no incident announcement — your protocol needs to respond appropriately while the issue resolves.
+
+### Immediate Actions
+
+**Do not widen your staleness threshold as a quick fix.** If a feed is stale because of a genuine relayer issue, widening your threshold to make it appear fresh does not make your protocol safer — it makes it less safe. Your threshold exists precisely to protect against this scenario.
+
+**Pause affected operations — not the entire protocol.** Suspend only the functions that depend on the stale feed. If CNGN is stale but USDT and USDC are fresh, only CNGN-collateralized operations need to pause.
+
+```solidity
+function getPrice(bytes32 assetId) internal view returns (int256) {
+    (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+        ORACLE.getAssetInfo(assetId);
+
+    require(exists,                                          "IFA: unsupported");
+    require(
+        block.timestamp - info.lastUpdateTime <= maxPriceAge[assetId],
+        "IFA: price feed stale — operation paused"
+    );
+
+    return info.price;
+}
+```
+
+**Keep withdrawals open.** Users must be able to exit positions and withdraw collateral regardless of oracle state. Never gate withdrawals on oracle freshness.
+
+**Activate fallback if available.** If your protocol has a secondary oracle integration, activate it for the affected asset. See [Building Fallback Strategies](/building-fallback-strategies).
+
+### Communication
+
+**Tell your users what is happening.** If a stale feed is causing protocol operations to pause, communicate it clearly — in your app UI, on your Discord, and on your social channels. Users who cannot execute transactions need to know why.
+
+**Report to IFÁ Labs.** If a feed is stale beyond 12 hours:
+
+- **Email:** [support@ifalabs.com](mailto:support@ifalabs.com)
+- **Telegram:** [t.me/ifalabs](https://t.me/ifalabs)
+
+Include the affected asset, the network, the current feed age, and the last observed `PriceUpdated` transaction hash.
+
+---
+
+## Staleness Decision Tree
+
+```text
+Feed age exceeds your MAX_PRICE_AGE
+              │
+              ▼
+Is the age within 1.5× the heartbeat interval?
+  │
+  ├── YES → Your threshold is too tight
+  │         Action: Widen MAX_PRICE_AGE to 1.5× heartbeat
+  │
+  └── NO  → Is this testnet?
+              │
+              ├── YES → Expected — testnet relayers are less active
+              │         Action: Use 24hr threshold on testnet
+              │
+              └── NO  → Are all feeds stale simultaneously?
+                          │
+                          ├── YES → Likely relayer issue
+                          │         Action: Check Telegram for incident
+                          │                 Report if no announcement
+                          │
+                          └── NO  → Single feed issue
+                                    Action: Check event history
+                                            Compare price to external sources
+                                            Report if age > 2× heartbeat
+```
+
+---
+
+## Preventing Staleness Issues in Production
+
+**Monitor proactively.** Set up off-chain monitoring that alerts your team before staleness reaches the point of causing transaction reverts. See [Running Price Monitoring](/running-price-monitoring).
+
+**Set alert thresholds below your contract thresholds.** If your contract reverts at `MAX_PRICE_AGE = 5400s`, set your monitoring alert at `4000s`. Your team should know about approaching staleness before users experience failed transactions.
+
+**Build fallback paths before you need them.** Implementing a secondary oracle fallback during an active staleness incident is stressful and error-prone. Build and test the fallback before launch. See [Building Fallback Strategies](/building-fallback-strategies).
+
+**Calibrate thresholds from real data, not estimates.** Run the cadence analysis script above against each asset you consume before deploying to production. Set `MAX_PRICE_AGE` based on observed maximum intervals — not heartbeat documentation.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Building Fallback Strategies" icon="shield" href="/building-fallback-strategies">
+    Implement secondary oracle fallbacks for when the primary feed is stale.
+  </Card>
+
+  <Card title="Running Price Monitoring" icon="chart-line" href="/running-price-monitoring">
+    Detect staleness before it causes transaction failures.
+  </Card>
+</CardGroup>

@@ -1,0 +1,257 @@
+---
+title: "Data Integrity Mechanisms"
+description: "The technical layers that protect IFÁ Labs price feed accuracy beyond the audit — from source validation through on-chain storage."
+---
+
+A security audit verifies that a contract does what it claims to do. Data integrity mechanisms are what ensure the data flowing through that contract is accurate in the first place. Both matter. Neither is sufficient alone.
+
+This page documents every technical layer IFÁ Labs uses to protect the accuracy, consistency, and manipulation-resistance of price data — from the moment it leaves a source to the moment it is readable on-chain.
+
+---
+
+## Why Data Integrity Requires Multiple Layers
+
+A single protection layer creates a single point of failure. If IFÁ Labs relied only on source diversity, a coordinated multi-source attack could corrupt the feed. If it relied only on outlier filtering, a slow price drift from corrupted sources could pass undetected. If it relied only on on-chain validation, bad data signed by relayers would be accepted without question.
+
+The defense-in-depth model ensures that compromising the feed requires simultaneously defeating every layer — a significantly higher bar than defeating any one of them.
+
+```text
+Source Data
+    │
+    -  Layer 1: Source Diversity
+    │  Multiple independent sources — no single point of failure
+    │
+    -  Layer 2: Source-Level Validation
+    │  Timestamp, volume, format, and health checks per data point
+    │
+    -  Layer 3: Outlier Detection
+    │  Statistical filtering tuned for stablecoin peg behavior
+    │
+    -  Layer 4: Consensus Algorithm
+    │  Weighted median — manipulation-resistant by design
+    │
+    -  Layer 5: Pre-Submission Validation
+    │  Zero-price guard, peg bounds, minimum source threshold
+    │
+    -  Layer 6: Decentralized Relay
+    │  No single relayer controls submission
+    │
+    -  Layer 7: On-Chain Storage Integrity
+       Immutable contract, no admin keys, full audit trail
+```
+
+---
+
+## Layer 1: Source Diversity
+
+**What it does:** Distributes the trust surface across multiple independent data providers. No single source can determine the final aggregated price.
+
+**How it works:**
+
+- Prices are collected from multiple independent source categories — CEXs, DEXs, forex providers, and regional exchanges
+- Sources are required to be genuinely independent — shared infrastructure or common ownership disqualifies sources from being counted separately
+- A minimum number of independent sources must contribute to any submitted update
+
+**What it protects against:**
+
+| Threat | Protection |
+| --- | --- |
+| Single source failure or outage | Remaining sources maintain feed continuity |
+| Single source manipulation | One corrupted source cannot move the weighted median significantly |
+| CEX-specific events | DEX and forex sources provide independent reference points |
+| Global market vs. regional market divergence | Regional sources for emerging market assets reflect local reality |
+
+**Limits of this layer:** Source diversity alone does not protect against coordinated multi-source attacks where several independent sources are simultaneously compromised. Outlier detection and consensus algorithms provide the next line of defense.
+
+---
+
+## Layer 2: Source-Level Validation
+
+**What it does:** Validates every individual data point before it enters the aggregation pipeline. Bad data is rejected at the source level — it never reaches the aggregation stage.
+
+**Checks applied per data point:**
+
+```text
+✓ Timestamp is within the current aggregation window
+✓ Price value is strictly positive and non-zero
+✓ Reported volume meets the minimum threshold for this source
+✓ API response is complete and well-formed — no partial or malformed data
+✓ Source is not flagged as degraded, offline, or under investigation
+✓ Price is within a broad sanity range — extreme values are rejected immediately
+```
+
+**What it protects against:**
+
+| Threat | Protection |
+| --- | --- |
+| Stale API responses from a slow or degraded source | Timestamp check rejects data outside the aggregation window |
+| Zero or negative price from a source error | Strict positive price guard rejects before aggregation |
+| Malformed API response from a source outage | Format validation rejects incomplete data |
+| Low-volume manipulated prices | Volume threshold prevents thin-market manipulation |
+
+---
+
+## Layer 3: Outlier Detection and Removal
+
+**What it does:** Identifies and removes data points that deviate significantly from the preliminary consensus — even if they passed source-level validation individually.
+
+**How it works:**
+
+A preliminary median is calculated from all validated data points. Any data point deviating beyond the configured threshold from this preliminary median is flagged as an outlier and removed from the final aggregation.
+
+Thresholds are calibrated per asset class:
+
+| Asset Class | Outlier Threshold | Rationale |
+| --- | --- | --- |
+| USD global stablecoins (USDT, USDC) | Tight — 0.15–0.25% | Rarely move — any significant deviation is suspicious |
+| Emerging market stablecoins (CNGN, ZARP, BRZ) | Moderate — 0.5–1.0% | Natural micro-fluctuations require slightly wider tolerance |
+| Reference assets (ETH) | Wider — 1.0–2.0% | Non-pegged asset — wider range is appropriate |
+
+**Additional outlier filters:**
+
+**Flash event filter:** Price spikes lasting less than a minimum configured duration are excluded regardless of magnitude. This specifically targets flash loan attacks — which by definition are extremely short-lived — and momentary liquidity events that do not reflect real market conditions.
+
+**Source reliability downweighting:** Sources with recent history of anomalous data are assigned lower weights for current rounds, reducing their influence on the final aggregation even if their current data passes the outlier threshold.
+
+**What it protects against:**
+
+| Threat | Protection |
+| --- | --- |
+| Single corrupt source reporting extreme price | Excluded as outlier before weighted median |
+| Flash loan attack creating temporary price spike | Flash event filter removes sub-duration spikes |
+| Coordinated manipulation from a minority of sources | Weighted median resists minority outliers by design |
+
+---
+
+## Layer 4: Consensus Algorithm
+
+**What it does:** Reduces the cleaned, validated data set to a single authoritative price using a manipulation-resistant algorithm.
+
+**Weighted median — the primary mechanism:**
+
+The weighted median is the central value in a distribution when data points are sorted by price and weighted by source quality. Unlike a simple average, the median is inherently resistant to extreme values — even if several sources report a manipulated price, the median remains anchored to the majority honest data as long as honest sources represent more than 50% of the total weight.
+
+```text
+Manipulation resistance example:
+
+5 sources, 2 compromised:
+  Source A (weight 0.30):  1.000100  ← honest
+  Source B (weight 0.25):  1.000080  ← honest
+  Source C (weight 0.20):  1.000090  ← honest
+  Source D (weight 0.15):  1.050000  ← compromised (5% above peg)
+  Source E (weight 0.10):  0.950000  ← compromised (5% below peg)
+
+Simple average:  1.010074  ← significantly influenced by compromised sources
+Weighted median: 1.000090  ← anchored to honest majority
+```
+
+The weighted median is the correct algorithm for stablecoin oracles where honest sources are expected to cluster tightly and manipulated sources are expected to be outliers.
+
+**Weighted average — secondary mechanism:**
+
+Used for assets during periods of very high source agreement — when all sources are reporting prices within an extremely tight band. In these conditions, an average provides marginally better precision than a median. The algorithm selects between median and average per asset per round based on the spread of the cleaned data set.
+
+---
+
+## Layer 5: Pre-Submission Validation
+
+**What it does:** Applies a final validation gate to the aggregated price before it is passed to relayers for signing and submission.
+
+**Checks applied:**
+
+**Zero-price guard (post-audit fix):** The aggregated price must be strictly greater than zero. A zero aggregated price — which could occur if all valid sources reported zero due to a catastrophic data failure — is rejected. This prevents division-by-zero errors in derived pair calculations that consume the feed.
+
+**Peg bounds check:** For stablecoin feeds, the aggregated price must fall within a configured range of the expected peg. A price outside this range is flagged and withheld from submission pending investigation — it may represent a genuine depeg event requiring human review before automated submission resumes.
+
+```text
+Example: USDT/USD peg bounds check
+
+Expected peg:    $1.00
+Bounds:          ±2%
+Acceptable range: $0.98 — $1.02
+
+Aggregated price: $0.975 → REJECTED — outside bounds, flagged for review
+Aggregated price: $1.001 → ACCEPTED — within bounds, proceeds to relay
+```
+
+**Minimum source threshold:** A minimum number of independent sources must have contributed valid data to the aggregated price. If too many sources were filtered out in earlier layers, submission is withheld rather than proceeding with an insufficiently diversified data set.
+
+**What it protects against:**
+
+| Threat | Protection |
+| --- | --- |
+| Catastrophic data failure producing zero price | Zero-price guard rejects before submission |
+| Genuine depeg event triggering automated liquidations | Peg bounds check withholds submission for human review |
+| Insufficient source diversity in a given round | Minimum source threshold prevents underpowered submissions |
+
+---
+
+## Layer 6: Decentralized Relay
+
+**What it does:** Ensures no single entity controls price submission to the on-chain contract.
+
+**How it works:**
+
+- Multiple independent relayers receive the validated aggregated price
+- Each relayer independently verifies the price against its own data before signing
+- Signed updates are submitted to the oracle contract by the decentralized relayer set
+- All submissions are attributed on-chain — the submitting relayer address is recorded for every update
+
+**What it protects against:**
+
+| Threat | Protection |
+| --- | --- |
+| Single relayer going offline | Other relayers maintain submission continuity |
+| Single relayer submitting a manipulated price | Independent relayer verification catches discrepancies |
+| Centralized control of price updates | No single entity has unilateral submission authority |
+
+**Current state and roadmap:** The relayer network is currently operating with economic incentives for honest behavior. Future protocol expansions include slashing mechanisms for provably dishonest relayers, further strengthening the economic security of the relay layer.
+
+---
+
+## Layer 7: On-Chain Storage Integrity
+
+**What it does:** Ensures that once a verified price is stored on-chain, it cannot be altered, deleted, or manipulated by any party — including IFÁ Labs.
+
+**Properties of the on-chain storage model:**
+
+**Immutable contracts:** The oracle contracts have no upgrade mechanism, no proxy pattern, and no admin keys with the ability to modify stored prices. Once a price is written to contract storage by an authorized relayer, it remains there until the next legitimate update.
+
+**No privileged write access:** Only authorized relayers can submit price updates. There is no owner function, no emergency override, and no backdoor that allows arbitrary price writes.
+
+**Full audit trail:** Every price update is permanently recorded on-chain with the block timestamp, the submitting relayer address, and the price value. The complete history of every feed is publicly verifiable by anyone — no data is ever deleted or overwritten without a corresponding `PriceUpdated` event.
+
+**Public read access:** All price data is readable by any address via public `view` functions. There is no access control on reads — no API key, no whitelist, no fee gate.
+
+---
+
+## Combined Defense Analysis
+
+The seven layers work together to create compounding protection:
+
+| Attack Vector | Layers That Defend |
+| --- | --- |
+| Single source compromise | Layer 1 (diversity), Layer 3 (outlier removal), Layer 4 (median) |
+| Flash loan price attack | Layer 2 (volume threshold), Layer 3 (flash event filter) |
+| Coordinated multi-source attack | Layer 4 (weighted median requires \>50% weight), Layer 5 (peg bounds) |
+| Relayer compromise | Layer 6 (decentralized relay, independent verification) |
+| Depeg event triggering cascade | Layer 5 (peg bounds check withholds submission) |
+| Zero-price data failure | Layer 2 (positive price guard), Layer 5 (zero-price guard) |
+| On-chain price tampering | Layer 7 (immutable contract, no admin keys) |
+| Historical data manipulation | Layer 7 (permanent audit trail, public event log) |
+
+No oracle network can guarantee perfect price accuracy under all conditions. What IFÁ Labs can guarantee is that compromising the price feed requires simultaneously defeating multiple independent layers — each of which operates at a different point in the pipeline with different attack surfaces.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Verification Proofs" icon="magnifying-glass" href="/verification-proofs">
+    Tools and methods for independently verifying IFÁ Labs price accuracy.
+  </Card>
+
+  <Card title="AdForensics Audit Summary" icon="shield-check" href="/adforensics-audit-summary">
+    The full audit results covering the contracts these mechanisms protect.
+  </Card>
+</CardGroup>

@@ -1,0 +1,164 @@
+---
+title: "Verify Price Integrity"
+description: "Staleness checks, deviation guards, and production-grade verification patterns for consuming IFÁ Labs price feeds safely."
+---
+
+Fetching a price is one line of code. Using that price safely in production is a different responsibility entirely.
+
+Before any price feed data touches critical logic — liquidations, collateral valuations, minting, settlement — your contract needs to verify three things: the asset is supported, the price is recent, and the value is within a reasonable range. Skipping any of these is a security vulnerability, not a minor oversight.
+
+This page covers each check individually, then puts them together into a single production-ready verification function.
+
+---
+
+## Check 1: Asset Existence
+
+Always confirm the feed exists before using the returned data. A non-existent asset returns zero values with `exists = false`. If you skip this check and proceed, you're executing logic against a price of zero.
+
+```solidity
+(IIfaPriceFeed.PriceFeed memory info, bool exists) = oracle.getAssetInfo(assetId);
+require(exists, "IFA: asset not supported");
+```
+
+This is the cheapest check — one boolean read. There is no reason to skip it.
+
+---
+
+## Check 2: Staleness
+
+Price data has a `lastUpdateTime` timestamp. If that timestamp is too far in the past, the price may no longer reflect current market conditions — a depeg could have occurred and your contract wouldn't know.
+
+```solidity
+uint256 public constant MAX_PRICE_AGE = 3600; // 1 hour
+
+require(
+    block.timestamp - info.lastUpdateTime <= MAX_PRICE_AGE,
+    "IFA: price feed is stale"
+);
+```
+
+**Choosing your staleness threshold:**
+
+| Use Case | Recommended Threshold | Reasoning |
+| --- | --- | --- |
+| Stablecoin lending / liquidations | 30 – 60 minutes | High stakes, needs freshness |
+| Stablecoin swaps | 1 – 2 hours | Moderate risk tolerance |
+| Analytics and dashboards | 4 – 6 hours | Read-only, lower risk |
+| General stablecoin protocols | 2 hours | Safe starting point |
+
+<Note>
+  IFÁ Labs updates feeds on a hybrid deviation \+ time trigger model. During calm markets, stablecoins near their peg will update less frequently — this is by design, not an outage. Set your threshold based on your protocol's actual risk tolerance, not the tightest possible value. Starting at 2 hours and tightening based on observed update patterns is the right approach.
+</Note>
+
+---
+
+## Check 3: Peg Deviation
+
+For stablecoin feeds, you know roughly what the price should be — close to \$1.00. A circuit breaker that rejects prices beyond a reasonable deviation band protects your protocol against oracle manipulation, source failures, or genuine depeg events that require human intervention before automated logic runs.
+
+```solidity
+// Require price within ±5% of $1.00 peg
+// Assumes decimal = -18, so $1.00 = 1e18
+int256 constant EXPECTED_PEG   = 1e18;
+uint256 constant MAX_DEVIATION = 500; // 500 basis points = 5%
+
+int256 deviation = info.price - EXPECTED_PEG;
+if (deviation < 0) deviation = -deviation;
+
+require(
+    uint256(deviation) <= uint256(EXPECTED_PEG) * MAX_DEVIATION / 10000,
+    "IFA: price deviation exceeds threshold"
+);
+```
+
+**Choosing your deviation threshold:**
+
+| Asset Type | Suggested Max Deviation | Notes |
+| --- | --- | --- |
+| USD stablecoins (USDT, USDC) | 1 – 2% | Tight — these rarely move |
+| Emerging market stablecoins | 3 – 5% | Slightly wider for local volatility |
+| Reference assets (ETH) | Not applicable | Don't use a peg check for non-pegged assets |
+
+<Warning>
+  Do not apply a \$1.00 peg deviation check to ETH/USD. ETH is not pegged. Use the deviation check only for assets that have a stable target price.
+</Warning>
+
+---
+
+## Full Verification Function
+
+Combining all three checks into a single internal function you can call from anywhere in your protocol:
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "ifapricefeed-interface/IIfaPriceFeed.sol";
+
+contract PriceConsumer {
+    IIfaPriceFeed public constant ORACLE =
+        IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC); // Base Mainnet
+
+    uint256 public constant MAX_PRICE_AGE   = 3600;  // 1 hour
+    uint256 public constant MAX_DEVIATION   = 500;   // 5% in basis points
+    int256  public constant EXPECTED_PEG    = 1e18;  // $1.00 scaled to 18 decimals
+
+    /// @notice Fetch and verify a stablecoin price feed
+    /// @param assetId The IFÁ Labs bytes32 asset identifier
+    /// @return price The verified scaled price value
+    /// @return decimal The negative scaling exponent (typically -18)
+    function getVerifiedPrice(bytes32 assetId)
+        internal
+        view
+        returns (int256 price, int8 decimal)
+    {
+        (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+            ORACLE.getAssetInfo(assetId);
+
+        // Check 1: Asset existence
+        require(exists, "IFA: asset not supported");
+
+        // Check 2: Staleness
+        require(
+            block.timestamp - info.lastUpdateTime <= MAX_PRICE_AGE,
+            "IFA: price feed is stale"
+        );
+
+        // Check 3: Peg deviation (stablecoins only)
+        int256 deviation = info.price - EXPECTED_PEG;
+        if (deviation < 0) deviation = -deviation;
+        require(
+            uint256(deviation) <= uint256(EXPECTED_PEG) * MAX_DEVIATION / 10000,
+            "IFA: price deviation exceeds threshold"
+        );
+
+        return (info.price, info.decimal);
+    }
+}
+```
+
+---
+
+## Additional Recommendations
+
+**Fail closed, not open.** If any check fails, revert. Do not fall through to a default value or proceed with stale data. A paused protocol is recoverable. A protocol that executed liquidations at a manipulated price is not.
+
+**Make thresholds configurable.** Hard-coded constants are fine for initial deployment, but consider a governance-controlled mapping of per-asset thresholds as your protocol matures. Different assets have different risk profiles.
+
+**Implement a multi-oracle fallback.** For high-value protocols, combining IFÁ Labs with a secondary oracle and taking the median eliminates single-oracle risk entirely. See [Building Fallback Strategies](/building-fallback-strategies) for a production implementation.
+
+**Monitor off-chain as well.** On-chain checks protect your contracts. Off-chain monitoring alerts your team before a situation reaches the point of a revert. See [Running Price Monitoring](/running-price-monitoring) for a ready-to-use monitoring script.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="EVM Integration Guide" icon="code" href="/installation-and-setup">
+    Build a complete production integration into your smart contracts.
+  </Card>
+
+  <Card title="Building Fallback Strategies" icon="shield" href="/building-fallback-strategies">
+    Layer IFÁ Labs with a secondary oracle for maximum protocol resilience.
+  </Card>
+</CardGroup>

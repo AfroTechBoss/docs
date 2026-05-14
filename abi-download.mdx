@@ -1,0 +1,312 @@
+---
+title: "ABI Download"
+description: "Get the official IFÁ Labs oracle ABI for use in your contracts, scripts, indexers, and development tools."
+---
+
+The Application Binary Interface (ABI) defines the complete contract interface — every function signature, parameter type, return type, event, and error. You need it any time you interact with the IFÁ Labs oracle from outside a Solidity contract — in ethers.js, web3.py, wagmi, a subgraph, or any other off-chain tooling.
+
+---
+
+## Recommended: Install the Interface Package
+
+The official npm package is the cleanest and most maintainable way to get the ABI. It includes the full interface, all type definitions, and stays in sync with contract updates.
+
+<Tabs>
+  <Tab title="npm">
+    ```bash
+        npm install ifapricefeed-interface
+    ```
+  </Tab>
+  <Tab title="yarn">
+    ```bash
+        yarn add ifapricefeed-interface
+    ```
+  </Tab>
+  <Tab title="Foundry">
+    ```bash
+        forge install IFA-Labs/IfaPriceFeed-interface
+    ```
+
+    Add to `remappings.txt`:
+
+    ```text
+        ifapricefeed-interface/=lib/IfaPriceFeed-interface/src/
+    ```
+  </Tab>
+</Tabs>
+
+### Using the ABI in JavaScript / TypeScript
+
+```javascript
+// CommonJS
+const IIfaPriceFeed = require("ifapricefeed-interface/abi/IIfaPriceFeed.json");
+
+// ES Modules / TypeScript
+import IIfaPriceFeed from "ifapricefeed-interface/abi/IIfaPriceFeed.json";
+
+// Use with ethers.js
+import { ethers } from "ethers";
+
+const provider = new ethers.JsonRpcProvider("https://mainnet.base.org");
+const oracle   = new ethers.Contract(
+    "0xA9F17344689C2c2328F94464998db1d3e35B80dC",
+    IIfaPriceFeed,
+    provider
+);
+
+const [info, exists] = await oracle.getAssetInfo(
+    "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d"
+);
+```
+
+### Using the Interface in Solidity
+
+```solidity
+import "ifapricefeed-interface/IIfaPriceFeed.sol";
+
+contract MyProtocol {
+    IIfaPriceFeed public constant ORACLE =
+        IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC);
+}
+```
+
+---
+
+## Alternative: Copy from GitHub
+
+If you prefer not to add a package dependency, copy the interface directly from the official repository:
+
+**Interface (Solidity):** [github.com/IFA-Labs/IfaPriceFeed-interface/blob/main/src/IIfaPriceFeed.sol](https://github.com/IFA-Labs/IfaPriceFeed-interface)
+
+**ABI (JSON):** [github.com/IFA-Labs/IfaPriceFeed-interface/blob/main/abi/IIfaPriceFeed.json](https://github.com/IFA-Labs/IfaPriceFeed-interface)
+
+<Warning>
+  Only use ABIs sourced from the official GitHub repository or the npm package. Never use an ABI from an unofficial source — a modified ABI is a common attack vector that can cause your application to misinterpret contract calls.
+</Warning>
+
+---
+
+## Alternative: Copy from Basescan
+
+The verified ABI is also available directly from the block explorer for each deployment:
+
+| Network | ABI Source |
+| --- | --- |
+| **Base Mainnet** | [basescan.org/.../code](https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC#code) |
+| **Base Sepolia** | [sepolia.basescan.org/.../code](https://sepolia.basescan.org/address/0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b#code) |
+| **AssetChain Testnet** | [scan-testnet.assetchain.org/.../code](https://scan-testnet.assetchain.org/address/0xBAc31e568883774A632275F9c8E7A5Bd117000F7#code) |
+
+On Basescan, scroll to the **Contract ABI** section under the **Contract** tab and click **Copy ABI** to get the raw JSON.
+
+---
+
+## Minimal ABI
+
+For scripts and monitoring tools that only need specific functions, a minimal ABI reduces bundle size and avoids importing unused definitions. Use only what your application calls:
+
+### Price Read Only
+
+```json
+[
+  {
+    "inputs": [
+      { "internalType": "bytes32", "name": "_assetIndex", "type": "bytes32" }
+    ],
+    "name": "getAssetInfo",
+    "outputs": [
+      {
+        "components": [
+          { "internalType": "int256",  "name": "price",          "type": "int256"  },
+          { "internalType": "int8",    "name": "decimal",        "type": "int8"    },
+          { "internalType": "uint256", "name": "lastUpdateTime", "type": "uint256" }
+        ],
+        "internalType": "struct IIfaPriceFeed.PriceFeed",
+        "name": "assetInfo",
+        "type": "tuple"
+      },
+      { "internalType": "bool", "name": "exist", "type": "bool" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]
+```
+
+### Batch Price Read
+
+```json
+[
+  {
+    "inputs": [
+      { "internalType": "bytes32[]", "name": "_assetIndexes", "type": "bytes32[]" }
+    ],
+    "name": "getAssetsInfo",
+    "outputs": [
+      {
+        "components": [
+          { "internalType": "int256",  "name": "price",          "type": "int256"  },
+          { "internalType": "int8",    "name": "decimal",        "type": "int8"    },
+          { "internalType": "uint256", "name": "lastUpdateTime", "type": "uint256" }
+        ],
+        "internalType": "struct IIfaPriceFeed.PriceFeed[]",
+        "name": "infos",
+        "type": "tuple[]"
+      },
+      { "internalType": "bool[]", "name": "exists", "type": "bool[]" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]
+```
+
+### Event Monitoring Only
+
+```json
+[
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true,  "internalType": "bytes32", "name": "assetId",   "type": "bytes32" },
+      { "indexed": false, "internalType": "int256",  "name": "price",     "type": "int256"  },
+      { "indexed": false, "internalType": "int8",    "name": "decimal",   "type": "int8"    },
+      { "indexed": false, "internalType": "uint64",  "name": "timestamp", "type": "uint64"  }
+    ],
+    "name": "PriceUpdated",
+    "type": "event"
+  }
+]
+```
+
+---
+
+## Using the ABI Across Frameworks
+
+### wagmi / viem (React / TypeScript)
+
+```typescript
+import { createPublicClient, http } from "viem";
+import { base } from "viem/chains";
+import IIfaPriceFeed from "ifapricefeed-interface/abi/IIfaPriceFeed.json";
+
+const client = createPublicClient({
+    chain:     base,
+    transport: http(),
+});
+
+const ORACLE_ADDRESS = "0xA9F17344689C2c2328F94464998db1d3e35B80dC" as const;
+
+const [info, exists] = await client.readContract({
+    address:      ORACLE_ADDRESS,
+    abi:          IIfaPriceFeed,
+    functionName: "getAssetInfo",
+    args:         ["0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d"],
+});
+
+if (exists) {
+    const price = Number(info.price) / 1e18;
+    console.log(`USDT/USD: $${price.toFixed(6)}`);
+}
+```
+
+---
+
+### web3.py
+
+```python
+from web3 import Web3
+import json
+
+with open("IIfaPriceFeed.json") as f:
+    abi = json.load(f)
+
+w3     = Web3(Web3.HTTPProvider("https://mainnet.base.org"))
+oracle = w3.eth.contract(
+    address="0xA9F17344689C2c2328F94464998db1d3e35B80dC",
+    abi=abi
+)
+
+USDT_ASSET_ID = bytes.fromhex(
+    "6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d"
+)
+
+result        = oracle.functions.getAssetInfo(USDT_ASSET_ID).call()
+info, exists  = result
+
+if exists:
+    price = info[0] / (10 ** -info[1])
+    print(f"USDT/USD: ${price:.6f}")
+```
+
+---
+
+### Hardhat / Foundry Tests
+
+```solidity
+// Foundry — import interface directly
+import "ifapricefeed-interface/IIfaPriceFeed.sol";
+
+contract MyTest is Test {
+    IIfaPriceFeed oracle =
+        IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC);
+
+    function test_readUSDTPrice() public view {
+        bytes32 usdtId =
+            0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d;
+
+        (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+            oracle.getAssetInfo(usdtId);
+
+        assertTrue(exists, "USDT feed should exist");
+        assertGt(info.price, 0, "Price should be positive");
+        assertEq(info.decimal, -18, "Decimal should be -18");
+    }
+}
+```
+
+```javascript
+// Hardhat — load ABI from package
+const IIfaPriceFeed = require("ifapricefeed-interface/abi/IIfaPriceFeed.json");
+
+describe("Oracle Integration", function () {
+    it("reads USDT price", async function () {
+        const oracle = await ethers.getContractAt(
+            IIfaPriceFeed,
+            "0xA9F17344689C2c2328F94464998db1d3e35B80dC"
+        );
+
+        const [info, exists] = await oracle.getAssetInfo(
+            "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d"
+        );
+
+        expect(exists).to.be.true;
+        expect(info.price).to.be.gt(0n);
+    });
+});
+```
+
+---
+
+## ABI Version Management
+
+The IFÁ Labs oracle ABI is stable. The contract interface is immutable — no upgrades, no proxy patterns, no admin keys that could change function signatures after deployment. The ABI you integrate today will work for the lifetime of the deployed contract.
+
+When new chains are deployed, the same ABI applies — the interface is identical across all deployments. You do not need separate ABI files per network.
+
+<Info>
+  If IFÁ Labs ever deploys a new contract version with interface changes, a new contract address will be issued and the old contract will remain fully functional. You will never be forced to migrate. The new address and updated ABI will be announced via [@ifalabs](https://x.com/ifalabs) and documented here before any transition period begins.
+</Info>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Security & Audits" icon="shield-check" href="/adforensics-audit-summary">
+    Review the security audit covering the contracts behind this ABI.
+  </Card>
+
+  <Card title="Function Reference" icon="code" href="/function-reference">
+    Complete reference for every function in the interface.
+  </Card>
+</CardGroup>

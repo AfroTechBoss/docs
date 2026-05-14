@@ -1,0 +1,562 @@
+---
+title: "Building Fallback Strategies"
+description: "How to design protocols that continue operating safely when a primary oracle feed is stale, unavailable, or behaving unexpectedly."
+---
+
+No oracle network is immune to delays, outages, or edge cases. A well-designed protocol anticipates these scenarios and responds correctly — not by proceeding with bad data, but by degrading gracefully to a safe state while maintaining as much functionality as possible.
+
+This page covers every fallback pattern available to protocols consuming IFÁ Labs feeds, from simple secondary oracle integration to full circuit breaker architectures.
+
+---
+
+## The Fallback Design Spectrum
+
+Fallback strategies exist on a spectrum between two extremes:
+
+```text
+MAXIMUM SAFETY                                    MAXIMUM AVAILABILITY
+      │                                                     │
+      ▼                                                     ▼
+ Hard revert          Protocol pause        Secondary oracle        Cached price
+ on any issue         on critical feeds     with consensus          with wide TTL
+      │                    │                     │                      │
+  Zero risk            High safety           Balanced              Higher risk
+  Zero uptime          Some downtime         Low downtime          Always up
+```
+
+The right position on this spectrum depends on your protocol's risk profile. A lending protocol running liquidations should sit far left. A price display dashboard can sit far right. Most production protocols need different strategies for different operations.
+
+---
+
+## Pattern 1: Hard Revert (Default)
+
+The simplest and safest fallback. If the primary feed is stale or invalid, revert. Nothing executes against bad data.
+
+```solidity
+function getPrice(bytes32 assetId)
+    internal
+    view
+    returns (int256 price, int8 decimal)
+{
+    (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+        ORACLE.getAssetInfo(assetId);
+
+    require(exists,                                          "IFA: asset not supported");
+    require(_isFresh(info.lastUpdateTime, MAX_PRICE_AGE),   "IFA: price feed is stale");
+    require(_isReasonable(info.price),                      "IFA: price deviation exceeded");
+
+    return (info.price, info.decimal);
+}
+```
+
+**Use when:** Liquidations, collateral valuation, minting, settlement — any operation where executing with bad data causes direct financial harm.
+
+**Trade-off:** Zero tolerance for oracle issues. If the feed is stale, the function reverts — users cannot execute until the feed recovers.
+
+---
+
+## Pattern 2: Secondary Oracle Fallback
+
+Attempt the primary oracle first. If it fails freshness or validity checks, try a secondary source before reverting.
+
+```solidity
+interface ISecondaryOracle {
+    function getPrice(address token)
+        external
+        view
+        returns (int256 price, uint256 updatedAt);
+}
+
+contract OracleWithFallback {
+    IIfaPriceFeed    public constant PRIMARY   =
+        IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC);
+
+    ISecondaryOracle public immutable SECONDARY;
+
+    uint256 public constant MAX_PRIMARY_AGE   = 3600;   // 1 hour
+    uint256 public constant MAX_SECONDARY_AGE = 7200;   // 2 hours — wider for fallback
+
+    constructor(address secondaryOracle) {
+        SECONDARY = ISecondaryOracle(secondaryOracle);
+    }
+
+    function getPrice(bytes32 assetId, address tokenAddress)
+        internal
+        view
+        returns (int256 price, bool fromFallback)
+    {
+        // Attempt primary — IFÁ Labs
+        (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+            PRIMARY.getAssetInfo(assetId);
+
+        if (
+            exists &&
+            _isFresh(info.lastUpdateTime, MAX_PRIMARY_AGE) &&
+            _isReasonable(info.price)
+        ) {
+            return (info.price, false);
+        }
+
+        // Primary failed — attempt secondary
+        (int256 secondaryPrice, uint256 secondaryUpdatedAt) =
+            SECONDARY.getPrice(tokenAddress);
+
+        require(
+            block.timestamp - secondaryUpdatedAt <= MAX_SECONDARY_AGE,
+            "Fallback: secondary oracle also stale"
+        );
+        require(secondaryPrice > 0, "Fallback: invalid secondary price");
+
+        return (secondaryPrice, true);
+    }
+}
+```
+
+<Note>
+  When using a secondary oracle as fallback, emit an event when fallback is triggered. Off-chain monitoring should alert your team immediately — fallback usage is a signal that the primary feed has an issue requiring investigation.
+</Note>
+
+---
+
+## Pattern 3: Median of Multiple Oracles
+
+For maximum price accuracy and manipulation resistance, aggregate prices from multiple independent oracles and take the median. A single manipulated or stale oracle cannot move the median significantly if the others are healthy.
+
+```solidity
+contract MultiOracleMedian {
+    IIfaPriceFeed public constant IFA_ORACLE =
+        IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC);
+
+    // Add interfaces for additional oracles
+    // IChainlinkFeed public constant CHAINLINK = ...
+    // IPythOracle    public constant PYTH      = ...
+
+    uint256 public constant MAX_PRICE_AGE = 3600;
+
+    function getMedianPrice(
+        bytes32 ifaAssetId
+        // Add additional asset identifiers for other oracles
+    )
+        internal
+        view
+        returns (int256 medianPrice)
+    {
+        int256[] memory prices   = new int256[](3);
+        uint256  validCount      = 0;
+
+        // Source 1 — IFÁ Labs
+        (IIfaPriceFeed.PriceFeed memory ifaInfo, bool ifaExists) =
+            IFA_ORACLE.getAssetInfo(ifaAssetId);
+
+        if (
+            ifaExists &&
+            _isFresh(ifaInfo.lastUpdateTime, MAX_PRICE_AGE) &&
+            ifaInfo.price > 0
+        ) {
+            prices[validCount++] = ifaInfo.price;
+        }
+
+        // Source 2 — Chainlink (example interface)
+        // (, int256 clPrice,, uint256 clUpdatedAt,) = CHAINLINK.latestRoundData();
+        // if (block.timestamp - clUpdatedAt <= MAX_PRICE_AGE && clPrice > 0) {
+        //     prices[validCount++] = clPrice * 1e10; // normalize to 18 decimals
+        // }
+
+        // Source 3 — Pyth (example interface)
+        // PythStructs.Price memory pythPrice = PYTH.getPriceUnsafe(pythPriceId);
+        // if (block.timestamp - pythPrice.publishTime <= MAX_PRICE_AGE) {
+        //     prices[validCount++] = int256(pythPrice.price) * 1e10;
+        // }
+
+        require(validCount >= 2, "Insufficient valid oracle sources");
+
+        return _median(prices, validCount);
+    }
+
+    /// @dev Simple median for small arrays — sort and return middle value
+    function _median(int256[] memory arr, uint256 count)
+        internal
+        pure
+        returns (int256)
+    {
+        // Insertion sort for small arrays (≤5 elements)
+        for (uint256 i = 1; i < count; i++) {
+            int256  key = arr[i];
+            uint256 j   = i;
+            while (j > 0 && arr[j - 1] > key) {
+                arr[j] = arr[j - 1];
+                j--;
+            }
+            arr[j] = key;
+        }
+
+        return count % 2 == 1
+            ? arr[count / 2]
+            : (arr[count / 2 - 1] + arr[count / 2]) / 2;
+    }
+}
+```
+
+**Use when:** High-value lending protocols, large stablecoin vaults, or any protocol where the cost of a manipulated price is significant enough to justify the additional gas and integration complexity.
+
+---
+
+## Pattern 4: Tiered Operations by Data Quality
+
+Different protocol operations have different tolerance for oracle uncertainty. Structure your protocol so that the strictness of price requirements scales with the risk of the operation.
+
+```solidity
+contract TieredOracleProtocol {
+    IIfaPriceFeed public constant ORACLE =
+        IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC);
+
+    uint256 constant TIER_1_MAX_AGE = 1800;  // 30 min — liquidations
+    uint256 constant TIER_2_MAX_AGE = 3600;  // 1 hour — borrowing
+    uint256 constant TIER_3_MAX_AGE = 7200;  // 2 hours — deposits, withdrawals
+    uint256 constant TIER_4_MAX_AGE = 86400; // 24 hours — read-only display
+
+    /// @notice Tier 1 — strictest. For liquidation logic only.
+    function getLiquidationPrice(bytes32 assetId)
+        internal
+        view
+        returns (int256)
+    {
+        (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+            ORACLE.getAssetInfo(assetId);
+
+        require(exists,                                         "IFA: unsupported");
+        require(_isFresh(info.lastUpdateTime, TIER_1_MAX_AGE), "IFA: stale for liquidation");
+        require(_isReasonable(info.price),                     "IFA: deviation too high");
+
+        return info.price;
+    }
+
+    /// @notice Tier 2 — for borrowing and minting.
+    function getBorrowPrice(bytes32 assetId)
+        internal
+        view
+        returns (int256)
+    {
+        (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+            ORACLE.getAssetInfo(assetId);
+
+        require(exists,                                         "IFA: unsupported");
+        require(_isFresh(info.lastUpdateTime, TIER_2_MAX_AGE), "IFA: stale for borrow");
+
+        return info.price;
+    }
+
+    /// @notice Tier 3 — for deposits and withdrawals.
+    function getDepositPrice(bytes32 assetId)
+        internal
+        view
+        returns (int256)
+    {
+        (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+            ORACLE.getAssetInfo(assetId);
+
+        require(exists, "IFA: unsupported");
+        require(
+            _isFresh(info.lastUpdateTime, TIER_3_MAX_AGE),
+            "IFA: stale for deposit"
+        );
+
+        return info.price;
+    }
+
+    /// @notice Tier 4 — for display only. Never use for financial logic.
+    function getDisplayPrice(bytes32 assetId)
+        external
+        view
+        returns (int256 price, bool isFresh)
+    {
+        (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+            ORACLE.getAssetInfo(assetId);
+
+        if (!exists) return (0, false);
+
+        return (
+            info.price,
+            _isFresh(info.lastUpdateTime, TIER_4_MAX_AGE)
+        );
+    }
+}
+```
+
+**Use when:** Complex protocols with multiple operation types — lending, borrowing, liquidation, deposits, withdrawals — that have genuinely different risk profiles and should not be constrained by the strictest possible staleness requirement across all functions.
+
+---
+
+## Pattern 5: Automatic Protocol Pause with Guardian Recovery
+
+When the primary feed fails in a way that cannot be resolved by a fallback — both primary and secondary are stale simultaneously — automatically pause sensitive operations and require guardian intervention to resume.
+
+```solidity
+contract PausableOracleProtocol {
+    IIfaPriceFeed public constant ORACLE =
+        IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC);
+
+    bool    public paused;
+    address public guardian;
+
+    uint256 public constant MAX_PRICE_AGE = 3600;
+
+    event ProtocolPaused(bytes32 indexed assetId, uint256 timestamp, string reason);
+    event ProtocolResumed(address indexed guardian, uint256 timestamp);
+
+    error ProtocolIsPaused();
+    error NotGuardian();
+    error OracleHealthCheckFailed(bytes32 assetId);
+
+    modifier onlyWhenHealthy(bytes32 assetId) {
+        if (paused) revert ProtocolIsPaused();
+
+        (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+            ORACLE.getAssetInfo(assetId);
+
+        if (!exists || !_isFresh(info.lastUpdateTime, MAX_PRICE_AGE)) {
+            paused = true;
+            emit ProtocolPaused(assetId, block.timestamp, !exists ? "feed_missing" : "feed_stale");
+            revert ProtocolIsPaused();
+        }
+        _;
+    }
+
+    /// @notice Critical operations — paused if oracle is unhealthy
+    function borrow(bytes32 collateralAssetId, uint256 amount)
+        external
+        onlyWhenHealthy(collateralAssetId)
+    {
+        // Borrow logic — only executes with a healthy oracle
+    }
+
+    /// @notice Safe operations — always available regardless of oracle state
+    function withdrawCollateral(uint256 amount) external {
+        // Withdrawals should remain available even when paused
+        // so users can exit positions safely
+    }
+
+    /// @notice Guardian resumes the protocol after oracle issue is resolved
+    function resume() external {
+        if (msg.sender != guardian) revert NotGuardian();
+
+        // Verify oracle is actually healthy before resuming
+        // Add checks for specific assets your protocol uses
+        paused = false;
+
+        emit ProtocolResumed(msg.sender, block.timestamp);
+    }
+
+    /// @notice Guardian can update staleness threshold if needed
+    function setMaxPriceAge(uint256 newMaxAge) external {
+        if (msg.sender != guardian) revert NotGuardian();
+        // Update MAX_PRICE_AGE — use a storage variable if you need this
+    }
+}
+```
+
+<Warning>
+  Always keep withdrawal and position-closing functions available even when the protocol is paused due to oracle issues. Users must be able to exit positions safely regardless of oracle state. Blocking withdrawals during a pause traps user funds and creates additional risk.
+</Warning>
+
+---
+
+## Pattern 6: TWAP as Fallback
+
+For protocols that cannot rely on spot prices alone, a Time-Weighted Average Price (TWAP) derived from on-chain DEX pools provides a manipulation-resistant fallback that is independent of the oracle infrastructure entirely.
+
+```solidity
+interface IUniswapV3Pool {
+    function observe(uint32[] calldata secondsAgos)
+        external
+        view
+        returns (int56[] memory tickCumulatives, uint160[] memory secondsPerLiquidityCumulativeX128s);
+
+    function slot0()
+        external
+        view
+        returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked);
+}
+
+contract TWAPFallback {
+    IIfaPriceFeed  public constant IFA_ORACLE =
+        IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC);
+
+    IUniswapV3Pool public immutable DEX_POOL;
+
+    uint32  public constant TWAP_PERIOD   = 1800; // 30-minute TWAP
+    uint256 public constant MAX_PRICE_AGE = 3600;
+
+    constructor(address dexPool) {
+        DEX_POOL = IUniswapV3Pool(dexPool);
+    }
+
+    function getPrice(bytes32 assetId)
+        internal
+        view
+        returns (int256 price, string memory source)
+    {
+        // Attempt primary — IFÁ Labs spot price
+        (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+            IFA_ORACLE.getAssetInfo(assetId);
+
+        if (
+            exists &&
+            _isFresh(info.lastUpdateTime, MAX_PRICE_AGE) &&
+            info.price > 0
+        ) {
+            return (info.price, "ifa-labs-spot");
+        }
+
+        // Fallback — on-chain TWAP from DEX pool
+        int256 twapPrice = _getTWAP();
+        require(twapPrice > 0, "TWAP: invalid price");
+
+        return (twapPrice, "uniswap-twap");
+    }
+
+    function _getTWAP() internal view returns (int256) {
+        uint32[] memory secondsAgos = new uint32[](2);
+        secondsAgos[0] = TWAP_PERIOD;
+        secondsAgos[1] = 0;
+
+        (int56[] memory tickCumulatives,) = DEX_POOL.observe(secondsAgos);
+
+        int56  tickDelta    = tickCumulatives[1] - tickCumulatives[0];
+        int24  avgTick      = int24(tickDelta / int56(uint56(TWAP_PERIOD)));
+        uint160 sqrtPriceX96 = _tickToSqrtPrice(avgTick);
+
+        return _sqrtPriceToPrice(sqrtPriceX96);
+    }
+
+    // Implement _tickToSqrtPrice and _sqrtPriceToPrice
+    // using TickMath and FullMath from Uniswap v3-core libraries
+}
+```
+
+<Note>
+  TWAP prices from DEX pools are manipulation-resistant for longer periods (30\+ minutes) but can be manipulated at the block level with sufficient capital. Use TWAP as a fallback for short-term oracle outages — not as a replacement for a reliable oracle network.
+</Note>
+
+---
+
+## Choosing the Right Pattern
+
+| Protocol Type | Recommended Pattern |
+| --- | --- |
+| Lending protocol — liquidations | Pattern 1 (hard revert) \+ Pattern 5 (auto-pause) |
+| Lending protocol — deposits/withdrawals | Pattern 4 (tiered operations) |
+| Stablecoin DEX or swap protocol | Pattern 3 (multi-oracle median) |
+| Payments and settlement | Pattern 2 (secondary fallback) |
+| Analytics dashboard | Pattern 4 Tier 4 (display only) |
+| High-value vault (\>\$10M TVL) | Pattern 3 \+ Pattern 5 |
+| Cross-chain protocol | Pattern 2 \+ cross-chain consistency check |
+
+---
+
+## Fallback Implementation Checklist
+
+<Steps>
+  <Step title="Define operation tiers">
+    Categorize every protocol function by its tolerance for oracle uncertainty. Liquidations are Tier 1 — strictest. Display functions are Tier 4 — most lenient.
+  </Step>
+  <Step title="Choose a pattern per tier">
+    Select the appropriate fallback pattern for each operation tier. You may use different patterns for different tiers within the same protocol.
+  </Step>
+  <Step title="Implement withdrawal safety">
+    Confirm that withdrawals and position-closing functions remain available under all oracle failure scenarios — including full protocol pause.
+  </Step>
+  <Step title="Wire up the guardian">
+    Define who the guardian is — a multisig, a timelock, or a governance contract — and confirm they can respond to a pause event within your acceptable recovery time window.
+  </Step>
+  <Step title="Emit events on fallback usage">
+    Every time a fallback path is taken, emit an event. Off-chain monitoring should alert your team immediately when fallback is triggered.
+  </Step>
+  <Step title="Test all failure modes">
+    Use Foundry's `vm.mockCall` to simulate stale prices, missing feeds, and secondary oracle failures. Every fallback path should have a test that exercises it.
+  </Step>
+  <Step title="Document your runbook">
+    Write a response procedure for every fallback scenario — what triggers it, what the guardian should check, what actions are available, and when to resume.
+  </Step>
+</Steps>
+
+---
+
+## Testing Fallback Logic with Foundry
+
+```solidity
+contract FallbackTest is Test {
+    MyProtocol protocol;
+    address    constant ORACLE = 0xA9F17344689C2c2328F94464998db1d3e35B80dC;
+    bytes32    constant USDT   = 0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d;
+
+    function setUp() public {
+        protocol = new MyProtocol(address(0xGuardian));
+    }
+
+    /// @notice Simulate a stale feed and verify hard revert
+    function test_stalePrice_revertsOnCriticalOperation() public {
+        // Warp time 2 hours past the last update
+        vm.warp(block.timestamp + 7200);
+
+        vm.expectRevert("IFA: price feed is stale");
+        protocol.borrow(USDT, 1000e18);
+    }
+
+    /// @notice Simulate stale primary — verify fallback is used
+    function test_stalePrice_fallbackUsed() public {
+        vm.warp(block.timestamp + 7200);
+
+        // Mock secondary oracle returning a fresh price
+        vm.mockCall(
+            address(protocol.SECONDARY()),
+            abi.encodeWithSelector(ISecondaryOracle.getPrice.selector),
+            abi.encode(int256(1e18), block.timestamp)
+        );
+
+        // Should not revert — fallback provides the price
+        protocol.borrow(USDT, 1000e18);
+    }
+
+    /// @notice Verify auto-pause fires when oracle is stale
+    function test_stalePricePausesProtocol() public {
+        assertFalse(protocol.paused());
+
+        vm.warp(block.timestamp + 7200);
+
+        vm.expectEmit(true, false, false, true);
+        emit ProtocolPaused(USDT, block.timestamp, "feed_stale");
+
+        vm.expectRevert(ProtocolIsPaused.selector);
+        protocol.borrow(USDT, 1000e18);
+
+        assertTrue(protocol.paused());
+    }
+
+    /// @notice Verify withdrawals remain available when paused
+    function test_paused_withdrawalStillWorks() public {
+        vm.warp(block.timestamp + 7200);
+
+        // Trigger pause
+        try protocol.borrow(USDT, 1000e18) {} catch {}
+        assertTrue(protocol.paused());
+
+        // Withdrawal should still work
+        protocol.withdrawCollateral(500e18);
+    }
+}
+```
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Cross-Chain Price Consistency" icon="link" href="/cross-chain-price-consistency">
+    Ensure consistent pricing across chains for multi-network protocols.
+  </Card>
+
+  <Card title="Running Price Monitoring" icon="chart-line" href="/running-price-monitoring">
+    Detect oracle issues before they reach your fallback logic.
+  </Card>
+</CardGroup>

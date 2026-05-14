@@ -1,0 +1,155 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "IFÁ LABS DOCS",
+  "colors": {
+    "primary": "#7461ec",
+    "light": "#958bd4",
+    "dark": "#7461ec"
+  },
+  "favicon": "/images/Dribbbleshot-4.png",
+  "navigation": {
+    "groups": [
+      {
+        "group": "INTRODUCTION",
+        "pages": [
+          "what-is-ifa-labs",
+          "why-stablecoin-focused-oracles",
+          "key-differentiators-vs-chainlink-pyth",
+          "supported-assets",
+          "supported-chains-and-roadmap"
+        ]
+      },
+      {
+        "group": "QUICKSTART",
+        "pages": [
+          "prerequisites",
+          "get-your-first-price-on-chain",
+          "verify-price-integrity"
+        ]
+      },
+      {
+        "group": "INTEGRATION GUIDES",
+        "pages": [
+          {
+            "group": "EVM Smart Contracts",
+            "pages": [
+              "installation-and-setup",
+              "read-latest-price",
+              "handle-stale-data",
+              "working-with-asset-ids",
+              "gas-optimization-tips",
+              "complete-example-contract"
+            ]
+          },
+          {
+            "group": "MCP Server (new)",
+            "pages": [
+              "what-is-the-ifa-labs-mcp-server",
+              "installation-and-setup-1",
+              "available-tools",
+              "example-queries",
+              "mcp-client-compatibility"
+            ]
+          }
+        ]
+      },
+      {
+        "group": "CORE CONCEPTS",
+        "pages": [
+          "how-ifa-aggregates-prices",
+          "data-sources-and-verification",
+          "update-triggers-deviation-time",
+          "decimal-precision-and-formatting"
+        ]
+      },
+      {
+        "group": "ONCHAIN REFERENCE",
+        "pages": [
+          "contract-addresses",
+          "function-reference",
+          "event-reference",
+          "abi-download"
+        ]
+      },
+      {
+        "group": "SECURITY & AUDITS",
+        "pages": [
+          "ad-forensics-audit-summary",
+          "data-integrity-mechanisms",
+          "verification-proofs",
+          "report-a-vulnerability"
+        ]
+      },
+      {
+        "group": "ADVANCED TOPICS",
+        "pages": [
+          "running-price-monitoring",
+          "building-fallback-strategies",
+          "cross-chain-price-consistency"
+        ]
+      },
+      {
+        "group": "TROUBLESHOOTING",
+        "pages": [
+          "common-integration-errors",
+          "error-code-reference",
+          "price-appears-stale"
+        ]
+      },
+      {
+        "group": "REFERENCE",
+        "pages": [
+          "supported-assets-full-table-with-zarp-added",
+          "network-information",
+          "changelog"
+        ]
+      },
+      {
+        "group": "SUPPORT & COMMUNITY",
+        "pages": [
+          "get-help",
+          "git-hub-and-bug-reports",
+          "faq"
+        ]
+      }
+    ]
+  },
+  "logo": {
+    "light": "/images/LinkedIncover-2.png",
+    "dark": "/images/LinkedIncover-3.png",
+    "href": "https://ifalabs.com"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Support",
+        "href": "mailto:support@ifalabs.com"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Dashboard",
+      "href": "https://dashboard.mintlify.com"
+    }
+  },
+  "contextual": {
+    "options": [
+     "copy",
+     "view",
+     "chatgpt",
+     "claude",
+     "perplexity",
+     "mcp",
+     "cursor",
+     "vscode"
+   ]
+  },
+  "footer": {
+    "socials": {
+      "x": "https://x.com/Ifalabs",
+      "github": "https://github.com/IFA-Labs",
+      "linkedin": "https://linkedin.com/company/ifalabs"
+    }
+  }
+}

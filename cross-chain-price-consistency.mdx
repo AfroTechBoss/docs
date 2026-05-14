@@ -1,0 +1,449 @@
+---
+title: "Cross-Chain Price Consistency"
+description: "How IFÁ Labs maintains consistent stablecoin pricing across all supported networks — and how to verify and build on that consistency in multi-chain protocols."
+---
+
+As IFÁ Labs expands across chains, protocols building multi-chain applications need confidence that the price of USDT on Base Mainnet and the price of USDT on AssetChain reflect the same underlying market reality. This page documents how IFÁ Labs guarantees cross-chain consistency, how to verify it independently, and how to build protocols that handle cross-chain price discrepancies correctly.
+
+---
+
+## How IFÁ Labs Maintains Cross-Chain Consistency
+
+Cross-chain price consistency is not an afterthought — it is a property of the architecture. Three design decisions make it possible:
+
+### Shared Data Sources
+
+Every IFÁ Labs deployment — regardless of chain — pulls price data from the same set of independent sources. The CEXs, DEXs, forex providers, and regional exchanges feeding Base Mainnet are the same ones feeding AssetChain Testnet. The raw input data is identical across deployments.
+
+### Unified Aggregation Logic
+
+The outlier detection thresholds, weighting model, consensus algorithm, and validation rules are identical across all chains. The same aggregation pipeline runs independently on each chain, but because the inputs and the logic are the same, the outputs are tightly aligned.
+
+### Synchronized Update Triggers
+
+Deviation thresholds and heartbeat intervals are configured identically across deployments. Both chains trigger updates under the same conditions — so prices move in lockstep when market conditions warrant an update.
+
+**The result:** Under normal conditions, the same asset on two different IFÁ Labs deployments should differ by less than **0.1%**. Larger deviations indicate either a network-specific relayer delay or a genuine cross-chain issue worth investigating.
+
+---
+
+## Expected Consistency Bounds
+
+| Condition | Expected Cross-Chain Deviation | Explanation |
+| --- | --- | --- |
+| Normal market conditions | \< 0.1% | Shared sources, identical logic, synchronized triggers |
+| Minor relayer delay on one chain | 0.1% – 0.5% | One chain's heartbeat fires slightly later |
+| Network congestion on one chain | 0.5% – 1.0% | Significant submission delay on the congested chain |
+| Relayer outage on one chain | \> 1.0% — investigate | One deployment falling significantly behind |
+| Genuine market event | Consistent across chains | Both chains update simultaneously — deviation stays low |
+
+---
+
+## Verifying Cross-Chain Consistency
+
+### Manual Verification Script
+
+Query the same asset across all supported networks and compare:
+
+```javascript
+const { ethers } = require("ethers");
+
+const NETWORKS = {
+  "base-mainnet": {
+    rpc:    "https://mainnet.base.org",
+    oracle: "0xA9F17344689C2c2328F94464998db1d3e35B80dC",
+  },
+  "base-sepolia": {
+    rpc:    "https://sepolia.base.org",
+    oracle: "0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b",
+  },
+  "assetchain-testnet": {
+    rpc:    "https://enugu-rpc.assetchain.org",
+    oracle: "0xBAc31e568883774A632275F9c8E7A5Bd117000F7",
+  },
+};
+
+const ABI = [
+  "function getAssetsInfo(bytes32[]) view returns ((int256 price, int8 decimal, uint256 lastUpdateTime)[], bool[])"
+];
+
+const ASSETS = {
+  "USDT/USD": "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d",
+  "USDC/USD": "0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d",
+  "CNGN/USD": "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a",
+  "ZARP/USD": "0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8",
+  "BRZ/USD":  "0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5",
+};
+
+const DEVIATION_ALERT_THRESHOLD = 0.001; // 0.1%
+
+async function checkCrossChainConsistency() {
+  const assetSymbols = Object.keys(ASSETS);
+  const assetIds     = Object.values(ASSETS);
+  const networkNames = Object.keys(NETWORKS);
+
+  // Fetch prices from all networks in parallel
+  const networkResults = await Promise.all(
+    networkNames.map(async (name) => {
+      const config   = NETWORKS[name];
+      const provider = new ethers.JsonRpcProvider(config.rpc);
+      const oracle   = new ethers.Contract(config.oracle, ABI, provider);
+
+      try {
+        const [infos, exists] = await oracle.getAssetsInfo(assetIds);
+        return {
+          network: name,
+          prices: assetSymbols.map((symbol, i) => ({
+            symbol,
+            price:   exists[i] ? Number(infos[i].price) / 1e18 : null,
+            age:     exists[i]
+              ? Math.floor(Date.now() / 1000) - Number(infos[i].lastUpdateTime)
+              : null,
+            exists:  exists[i],
+          })),
+        };
+      } catch (err) {
+        return { network: name, error: err.message, prices: [] };
+      }
+    })
+  );
+
+  // Compare prices across networks per asset
+  console.log("Cross-Chain Consistency Report");
+  console.log("═".repeat(70));
+
+  for (const symbol of assetSymbols) {
+    console.log(`\n${symbol}`);
+
+    const pricesByNetwork = networkResults.map((result) => ({
+      network: result.network,
+      price:   result.prices.find((p) => p.symbol === symbol)?.price ?? null,
+      age:     result.prices.find((p) => p.symbol === symbol)?.age ?? null,
+      error:   result.error ?? null,
+    }));
+
+    // Print per-network prices
+    pricesByNetwork.forEach(({ network, price, age, error }) => {
+      if (error) {
+        console.log(`  ${network}: ERROR — ${error}`);
+      } else if (price === null) {
+        console.log(`  ${network}: Not supported`);
+      } else {
+        console.log(`  ${network}: $${price.toFixed(6)} (${age}s old)`);
+      }
+    });
+
+    // Calculate max deviation between networks
+    const validPrices = pricesByNetwork
+      .filter((r) => r.price !== null)
+      .map((r) => r.price);
+
+    if (validPrices.length < 2) continue;
+
+    const maxPrice     = Math.max(...validPrices);
+    const minPrice     = Math.min(...validPrices);
+    const deviation    = (maxPrice - minPrice) / minPrice;
+
+    const status = deviation > DEVIATION_ALERT_THRESHOLD
+      ? `⚠️  INVESTIGATE — ${(deviation * 100).toFixed(4)}% deviation`
+      : `✓  Consistent — ${(deviation * 100).toFixed(4)}% deviation`;
+
+    console.log(`  ${status}`);
+  }
+}
+
+checkCrossChainConsistency();
+```
+
+---
+
+### Continuous Cross-Chain Monitor
+
+For ongoing monitoring of cross-chain consistency in production:
+
+```javascript
+const { ethers }  = require("ethers");
+
+const ALERT_THRESHOLD  = 0.001; // 0.1%
+const POLL_INTERVAL    = 300_000; // 5 minutes
+
+// Asset to monitor — USDT/USD across all live networks
+const ASSET_ID = "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d";
+const SYMBOL   = "USDT/USD";
+
+const NETWORKS = {
+  "base-mainnet":      "0xA9F17344689C2c2328F94464998db1d3e35B80dC",
+  "assetchain-testnet": "0xBAc31e568883774A632275F9c8E7A5Bd117000F7",
+};
+
+const ABI = [
+  "function getAssetInfo(bytes32) view returns ((int256 price, int8 decimal, uint256 lastUpdateTime), bool exists)"
+];
+
+const providers = {
+  "base-mainnet":       new ethers.JsonRpcProvider("https://mainnet.base.org"),
+  "assetchain-testnet": new ethers.JsonRpcProvider("https://enugu-rpc.assetchain.org"),
+};
+
+async function monitorConsistency() {
+  const results = await Promise.all(
+    Object.entries(NETWORKS).map(async ([network, address]) => {
+      const oracle = new ethers.Contract(address, ABI, providers[network]);
+      try {
+        const [info, exists] = await oracle.getAssetInfo(ASSET_ID);
+        return {
+          network,
+          price:  exists ? Number(info.price) / 1e18 : null,
+          exists,
+        };
+      } catch (err) {
+        return { network, price: null, exists: false, error: err.message };
+      }
+    })
+  );
+
+  const validResults = results.filter((r) => r.price !== null);
+  if (validResults.length < 2) return;
+
+  const prices    = validResults.map((r) => r.price);
+  const maxDev    = (Math.max(...prices) - Math.min(...prices)) / Math.min(...prices);
+
+  if (maxDev > ALERT_THRESHOLD) {
+    console.error(`⚠️  [${new Date().toISOString()}] Cross-chain deviation alert — ${SYMBOL}`);
+    validResults.forEach((r) => {
+      console.error(`  ${r.network}: $${r.price.toFixed(6)}`);
+    });
+    console.error(`  Max deviation: ${(maxDev * 100).toFixed(4)}%`);
+
+    // Trigger your alerting integration here
+  } else {
+    console.log(`✓ [${new Date().toISOString()}] ${SYMBOL} consistent across chains (${(maxDev * 100).toFixed(4)}% deviation)`);
+  }
+}
+
+setInterval(monitorConsistency, POLL_INTERVAL);
+monitorConsistency();
+```
+
+---
+
+## Building Multi-Chain Protocols on IFÁ Labs
+
+### Pattern 1: Query Locally, Trust the Consistency Guarantee
+
+The simplest approach. Each chain queries its own IFÁ Labs deployment and trusts that prices are consistent within the documented bounds. No cross-chain communication required.
+
+```solidity
+// Contract deployed on Base Mainnet
+contract BaseProtocol {
+    IIfaPriceFeed public constant ORACLE =
+        IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC);
+
+    function getLocalPrice(bytes32 assetId)
+        internal
+        view
+        returns (int256 price)
+    {
+        (IIfaPriceFeed.PriceFeed memory info, bool exists) =
+            ORACLE.getAssetInfo(assetId);
+
+        require(exists, "IFA: unsupported");
+        require(
+            block.timestamp - info.lastUpdateTime <= 3600,
+            "IFA: stale"
+        );
+
+        return info.price;
+    }
+}
+
+// Identical contract deployed on AssetChain
+// Uses the AssetChain oracle address instead
+// Same asset IDs — no remapping required
+contract AssetChainProtocol {
+    IIfaPriceFeed public constant ORACLE =
+        IIfaPriceFeed(0xBAc31e568883774A632275F9c8E7A5Bd117000F7);
+
+    // Same getLocalPrice() logic — asset IDs are network-agnostic
+}
+```
+
+**Use when:** Protocol logic is executed independently on each chain with no cross-chain settlement. Each chain's execution uses local oracle data.
+
+---
+
+### Pattern 2: Cross-Chain Price Validation Before Settlement
+
+For protocols that execute on one chain but settle on another — cross-chain swaps, bridges, or omnichain applications — validate that prices are consistent before committing to a settlement amount.
+
+```solidity
+// Pseudo-code — adapt to your cross-chain messaging layer
+// (LayerZero, Wormhole, Axelar, etc.)
+
+contract CrossChainSettlement {
+    IIfaPriceFeed public constant LOCAL_ORACLE =
+        IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC); // Base Mainnet
+
+    uint256 public constant MAX_CROSS_CHAIN_DEVIATION = 10; // 0.1% in basis points
+    uint256 public constant MAX_PRICE_AGE             = 3600;
+
+    struct CrossChainPriceProof {
+        int256  remotePrice;
+        uint256 remoteTimestamp;
+        bytes   signature; // Signed by the remote chain's relayer or oracle
+    }
+
+    function executeWithCrossChainValidation(
+        bytes32                assetId,
+        uint256                amount,
+        CrossChainPriceProof   calldata remoteProof
+    )
+        external
+    {
+        // Get local price
+        (IIfaPriceFeed.PriceFeed memory localInfo, bool exists) =
+            LOCAL_ORACLE.getAssetInfo(assetId);
+
+        require(exists,                                              "IFA: unsupported");
+        require(_isFresh(localInfo.lastUpdateTime, MAX_PRICE_AGE),  "IFA: local price stale");
+        require(_isFresh(remoteProof.remoteTimestamp, MAX_PRICE_AGE), "IFA: remote price stale");
+
+        // Validate cross-chain price consistency
+        uint256 deviation = _deviation(localInfo.price, remoteProof.remotePrice);
+        require(
+            deviation <= MAX_CROSS_CHAIN_DEVIATION,
+            "Cross-chain price deviation too high — settlement paused"
+        );
+
+        // Execute settlement at local price
+        uint256 settlementValue = uint256(localInfo.price) * amount / 1e18;
+        _settle(settlementValue);
+    }
+
+    function _deviation(int256 price0, int256 price1)
+        internal
+        pure
+        returns (uint256)
+    {
+        int256 diff  = price0 > price1 ? price0 - price1 : price1 - price0;
+        int256 basis = price0 > price1 ? price1 : price0;
+        return uint256(diff) * 10000 / uint256(basis);
+    }
+}
+```
+
+---
+
+### Pattern 3: Cross-Chain Price Averaging
+
+For protocols that want maximum accuracy in cross-chain settlement — average the prices from both chains to get a value that neither chain's potential lag can significantly influence.
+
+```solidity
+// This pattern requires cross-chain messaging to bring the remote price on-chain
+// Adapt to your cross-chain messaging layer
+
+contract CrossChainAveragePrice {
+    IIfaPriceFeed public constant LOCAL_ORACLE =
+        IIfaPriceFeed(0xA9F17344689C2c2328F94464998db1d3e35B80dC);
+
+    mapping(bytes32 => int256)  public remotePrice;
+    mapping(bytes32 => uint256) public remotePriceTimestamp;
+
+    uint256 public constant MAX_PRICE_AGE = 3600;
+
+    /// @notice Called by cross-chain message handler with remote chain price
+    function updateRemotePrice(
+        bytes32 assetId,
+        int256  price,
+        uint256 timestamp
+    )
+        external
+        onlyCrossChainMessenger
+    {
+        require(price > 0,                                  "Invalid remote price");
+        require(_isFresh(timestamp, MAX_PRICE_AGE),         "Remote price stale");
+
+        remotePrice[assetId]          = price;
+        remotePriceTimestamp[assetId] = timestamp;
+    }
+
+    /// @notice Returns the average of local and remote prices
+    function getAveragePrice(bytes32 assetId)
+        internal
+        view
+        returns (int256 avgPrice)
+    {
+        (IIfaPriceFeed.PriceFeed memory localInfo, bool exists) =
+            LOCAL_ORACLE.getAssetInfo(assetId);
+
+        require(exists,                                         "IFA: unsupported");
+        require(_isFresh(localInfo.lastUpdateTime, MAX_PRICE_AGE), "Local price stale");
+        require(_isFresh(remotePriceTimestamp[assetId], MAX_PRICE_AGE), "Remote price stale");
+        require(remotePrice[assetId] > 0,                      "No remote price");
+
+        return (localInfo.price + remotePrice[assetId]) / 2;
+    }
+}
+```
+
+---
+
+## Asset IDs Are Network-Agnostic
+
+One of the most important properties of IFÁ Labs for multi-chain development: **asset IDs are identical across every network.** The `bytes32` identifier for USDT/USD on Base Mainnet is exactly the same on AssetChain Testnet and will be the same on every future deployment.
+
+```solidity
+// These constants work on every IFÁ Labs deployment — no remapping needed
+bytes32 public constant USDT_ASSET_ID =
+    0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d;
+
+bytes32 public constant CNGN_ASSET_ID =
+    0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a;
+
+bytes32 public constant ZARP_ASSET_ID =
+    0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8;
+```
+
+The only thing that changes between networks is the oracle contract address. Everything else — asset IDs, function signatures, return types, event signatures — is identical.
+
+---
+
+## Handling Temporary Cross-Chain Divergence
+
+Even with shared sources and synchronized triggers, brief periods of cross-chain price divergence are possible — typically caused by network congestion delaying a submission on one chain. Build your protocol to handle this gracefully:
+
+**Define your acceptable divergence threshold explicitly.** Document the maximum cross-chain deviation your protocol tolerates and enforce it in code. `0.1%` is a reasonable default for most stablecoin protocols.
+
+**Use the more conservative price for settlement.** When two chains report different prices, use the lower price for selling and the higher price for buying — this protects both parties from being disadvantaged by the divergence.
+
+**Pause cross-chain operations on high divergence, not all operations.** If cross-chain deviation exceeds your threshold, pause the cross-chain settlement path specifically — not the entire protocol. Local operations on each chain can continue using local prices.
+
+**Alert and investigate — don't silently ignore.** Any divergence above your threshold should trigger an alert. Brief divergence due to congestion resolves on its own. Sustained divergence may indicate a relayer issue on one chain that needs intervention.
+
+---
+
+## Roadmap: Native Cross-Chain Price Synchronization
+
+IFÁ Labs' H2 2026 roadmap includes native cross-chain infrastructure that will make cross-chain consistency stronger and easier to build on:
+
+| Feature | Description | Impact |
+| --- | --- | --- |
+| **Cross-Chain Messaging** | Direct price propagation via LayerZero or Wormhole | Sub-minute synchronization across chains |
+| **Consistency Proofs** | On-chain verification that prices match across deployments | Trustless cross-chain price validation without external messaging |
+| **Global View Contracts** | Single-query endpoints returning prices from any supported chain | Simplified multi-chain integration |
+
+These features will be backward-compatible with existing integrations. Protocols built on the current architecture will benefit automatically as the infrastructure upgrades.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Building Fallback Strategies" icon="shield" href="/building-fallback-strategies">
+    Design protocols that degrade gracefully when any oracle feed is unavailable.
+  </Card>
+
+  <Card title="Running Price Monitoring" icon="chart-line" href="/running-price-monitoring">
+    Add cross-chain consistency checks to your production monitoring stack.
+  </Card>
+</CardGroup>

@@ -1,0 +1,420 @@
+---
+title: "Verification Proofs"
+description: "Tools, methods, and step-by-step processes for independently verifying IFÁ Labs price accuracy — without trusting IFÁ Labs."
+---
+
+Trustless infrastructure is only trustless if users can verify it themselves. This page documents every method available for independently confirming that IFÁ Labs price feeds are accurate, fresh, and consistent with real market conditions — using nothing but public on-chain data and publicly available market sources.
+
+No trust in IFÁ Labs is required to verify any of the claims on this page.
+
+---
+
+## What Can Be Verified
+
+| Claim | Verification Method | Trust Required |
+| --- | --- | --: |
+| Current on-chain price is accurate | Compare against external market sources | None |
+| Price feed is fresh | Read `lastUpdateTime` from contract | None |
+| Asset ID is correctly derived | Independently compute `keccak256` | None |
+| Contract is the official deployment | Cross-reference against this page \+ Basescan verification | None |
+| Historical prices are unmodified | Query `PriceUpdated` event log | None |
+| Audit findings are resolved | Review deployed bytecode against audited commit | None |
+
+---
+
+## Method 1: On-Chain Price Verification
+
+The most direct verification. Read the current price from the oracle contract and compare it against independent market sources.
+
+### Step 1 — Read the Current On-Chain Price
+
+<Tabs>
+  <Tab title="Basescan (No Code)">
+    <Steps>
+      <Step title="Open the Read Contract page">
+        Go to [basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC#readContract](https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC#readContract)
+      </Step>
+      <Step title="Call getAssetInfo">
+        Enter the asset ID for the feed you want to verify — for example, USDT/USD:
+
+        ```text
+                0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d
+        ```
+      </Step>
+      <Step title="Read the result">
+        Note the `price`, `decimal`, and `lastUpdateTime` values returned.
+
+        Convert to human-readable: `price ÷ 10^(-decimal)`
+
+        For `price = 1000124000000000000` and `decimal = -18`:
+
+        ```text
+                1000124000000000000 ÷ 10^18 = 1.000124
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="ethers.js">
+    ```javascript
+        const { ethers } = require("ethers");
+    
+        const ORACLE_ADDRESS = "0xA9F17344689C2c2328F94464998db1d3e35B80dC";
+        const provider       = new ethers.JsonRpcProvider("https://mainnet.base.org");
+    
+        const ABI = [
+          "function getAssetInfo(bytes32) view returns ((int256 price, int8 decimal, uint256 lastUpdateTime), bool exists)"
+        ];
+    
+        const oracle = new ethers.Contract(ORACLE_ADDRESS, ABI, provider);
+    
+        async function verifyPrice(assetId, symbol) {
+          const [info, exists] = await oracle.getAssetInfo(assetId);
+    
+          if (!exists) {
+            console.log(`${symbol}: Not supported`);
+            return;
+          }
+    
+          const price       = Number(info.price) / 10 ** -Number(info.decimal);
+          const ageSeconds  = Math.floor(Date.now() / 1000) - Number(info.lastUpdateTime);
+          const updatedAt   = new Date(Number(info.lastUpdateTime) * 1000).toISOString();
+    
+          console.log(`${symbol}`);
+          console.log(`  On-chain price: $${price.toFixed(6)}`);
+          console.log(`  Last updated:   ${updatedAt} (${ageSeconds}s ago)`);
+          console.log(`  Raw price:      ${info.price.toString()}`);
+          console.log(`  Decimal:        ${info.decimal}`);
+        }
+    
+        const assets = [
+          ["0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d", "USDT/USD"],
+          ["0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d", "USDC/USD"],
+          ["0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a", "CNGN/USD"],
+          ["0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8", "ZARP/USD"],
+          ["0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5", "BRZ/USD"],
+        ];
+    
+        Promise.all(assets.map(([id, sym]) => verifyPrice(id, sym)));
+    ```
+  </Tab>
+  <Tab title="web3.py">
+    ```python
+        from web3 import Web3
+        from datetime import datetime, timezone
+    
+        provider = Web3(Web3.HTTPProvider("https://mainnet.base.org"))
+    
+        ABI = [{
+            "inputs":  [{"name": "_assetIndex", "type": "bytes32"}],
+            "name":    "getAssetInfo",
+            "outputs": [
+                {"components": [
+                    {"name": "price",          "type": "int256"},
+                    {"name": "decimal",        "type": "int8"},
+                    {"name": "lastUpdateTime", "type": "uint256"}
+                ], "type": "tuple"},
+                {"name": "exist", "type": "bool"}
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        }]
+    
+        oracle = provider.eth.contract(
+            address="0xA9F17344689C2c2328F94464998db1d3e35B80dC",
+            abi=ABI
+        )
+    
+        assets = {
+            bytes.fromhex("6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d"): "USDT/USD",
+            bytes.fromhex("83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a"): "CNGN/USD",
+            bytes.fromhex("12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8"): "ZARP/USD",
+        }
+    
+        for asset_id, symbol in assets.items():
+            result       = oracle.functions.getAssetInfo(asset_id).call()
+            info, exists = result
+    
+            if not exists:
+                print(f"{symbol}: Not supported")
+                continue
+    
+            price      = info[0] / (10 ** -info[1])
+            updated_at = datetime.fromtimestamp(info[2], tz=timezone.utc).isoformat()
+    
+            print(f"{symbol}")
+            print(f"  On-chain price: ${price:.6f}")
+            print(f"  Last updated:   {updated_at}")
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+### Step 2 — Compare Against Independent Market Sources
+
+Cross-reference the on-chain price against independent market data sources. For accurate verification, use sources that are not part of IFÁ Labs' aggregation pipeline.
+
+**Recommended verification sources by asset:**
+
+| Asset | Recommended Sources |
+| --- | --- |
+| USDT/USD | CoinGecko, CoinMarketCap, Kraken, Binance spot price |
+| USDC/USD | CoinGecko, CoinMarketCap, Coinbase spot price |
+| CNGN/USD | Nigerian exchange rates, CBN reference rate, local P2P markets |
+| ZARP/USD | South African Reserve Bank reference rate, local exchange rates |
+| BRZ/USD | Brazilian exchange rates, local exchange spot price |
+| ETH/USD | CoinGecko, Binance, Coinbase spot price |
+
+**What to expect:**
+
+For global stablecoins (USDT, USDC), the IFÁ Labs on-chain price should match external sources within **0.1–0.3%** under normal market conditions.
+
+For emerging market stablecoins (CNGN, ZARP, BRZ), expect alignment within **0.3–1.0%** — slightly wider due to natural spread between exchange venues and the time lag inherent in any oracle update cycle.
+
+Deviations outside these ranges during normal market conditions warrant investigation. See [Report a Vulnerability](/report-a-vulnerability) if you observe a persistent unexplained discrepancy.
+
+---
+
+## Method 2: Asset ID Independent Verification
+
+Verify that any asset ID published by IFÁ Labs is correctly derived from its symbol string — without trusting IFÁ Labs' published values.
+
+```javascript
+const { ethers } = require("ethers");
+
+function verifyAssetId(symbol, publishedId) {
+  const computed = ethers.keccak256(ethers.toUtf8Bytes(symbol));
+  const match    = computed.toLowerCase() === publishedId.toLowerCase();
+
+  console.log(`${symbol}`);
+  console.log(`  Published ID: ${publishedId}`);
+  console.log(`  Computed ID:  ${computed}`);
+  console.log(`  Match:        ${match ? "✓ Verified" : "✗ MISMATCH — do not use"}`);
+
+  return match;
+}
+
+const assets = [
+  ["USDT/USD", "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d"],
+  ["USDC/USD", "0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d"],
+  ["CNGN/USD", "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a"],
+  ["ZARP/USD", "0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8"],
+  ["BRZ/USD",  "0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5"],
+  ["ETH/USD",  "0x8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0"],
+];
+
+assets.forEach(([symbol, id]) => verifyAssetId(symbol, id));
+```
+
+**Expected output:**
+
+```text
+USDT/USD
+  Published ID: 0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d
+  Computed ID:  0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d
+  Match:        ✓ Verified
+
+CNGN/USD
+  Published ID: 0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a
+  Computed ID:  0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a
+  Match:        ✓ Verified
+```
+
+Run this against every asset ID before hardcoding it in a production contract. A mismatch means either the published ID or the symbol string is wrong.
+
+---
+
+## Method 3: Historical Price Verification
+
+Verify that historical prices recorded in the event log are consistent and unmodified.
+
+```javascript
+const { ethers } = require("ethers");
+
+const ORACLE_ADDRESS = "0xA9F17344689C2c2328F94464998db1d3e35B80dC";
+const provider       = new ethers.JsonRpcProvider("https://mainnet.base.org");
+
+const ABI = [
+  "event PriceUpdated(bytes32 indexed assetId, int256 price, int8 decimal, uint64 timestamp)"
+];
+
+const oracle = new ethers.Contract(ORACLE_ADDRESS, ABI, provider);
+
+async function verifyPriceHistory(assetId, symbol, lookbackBlocks = 50000) {
+  const currentBlock = await provider.getBlockNumber();
+
+  const events = await oracle.queryFilter(
+    oracle.filters.PriceUpdated(assetId),
+    currentBlock - lookbackBlocks,
+    currentBlock
+  );
+
+  console.log(`\n${symbol} — Last ${events.length} updates:`);
+  console.log("─".repeat(70));
+
+  let previousPrice = null;
+
+  events.forEach(event => {
+    const price     = Number(event.args.price) / 1e18;
+    const timestamp = new Date(Number(event.args.timestamp) * 1000).toISOString();
+    const change    = previousPrice
+      ? ((price - previousPrice) / previousPrice * 100).toFixed(4)
+      : "—";
+
+    console.log(`Block ${event.blockNumber} | ${timestamp}`);
+    console.log(`  Price: $${price.toFixed(6)}  Change: ${change}%`);
+    console.log(`  Tx:    ${event.transactionHash}`);
+
+    previousPrice = price;
+  });
+}
+
+verifyPriceHistory(
+  "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a",
+  "CNGN/USD"
+);
+```
+
+**What to look for:**
+
+- **Consistent update cadence** — intervals should align with the expected deviation/heartbeat trigger model
+- **Reasonable price progression** — prices should move gradually, not jump discontinuously except during known market events
+- **No gaps in the log** — each event references the previous block's state; gaps may indicate a period of staleness worth investigating
+- **Transaction hashes are unique** — duplicate transaction hashes would indicate data tampering, which is cryptographically impossible on a functioning blockchain
+
+---
+
+## Method 4: Cross-Chain Price Consistency Verification
+
+For protocols operating across multiple chains, verify that IFÁ Labs prices are consistent across deployments.
+
+```javascript
+const { ethers } = require("ethers");
+
+const NETWORKS = {
+  "base-mainnet": {
+    rpc:     "https://mainnet.base.org",
+    oracle:  "0xA9F17344689C2c2328F94464998db1d3e35B80dC",
+  },
+  "base-sepolia": {
+    rpc:     "https://sepolia.base.org",
+    oracle:  "0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b",
+  },
+};
+
+const ABI = [
+  "function getAssetInfo(bytes32) view returns ((int256 price, int8 decimal, uint256 lastUpdateTime), bool exists)"
+];
+
+async function crossChainVerification(assetId, symbol) {
+  const results = await Promise.all(
+    Object.entries(NETWORKS).map(async ([name, config]) => {
+      const provider = new ethers.JsonRpcProvider(config.rpc);
+      const oracle   = new ethers.Contract(config.oracle, ABI, provider);
+      const [info, exists] = await oracle.getAssetInfo(assetId);
+
+      return {
+        network: name,
+        price:   exists ? Number(info.price) / 1e18 : null,
+        exists,
+      };
+    })
+  );
+
+  console.log(`\n${symbol} — Cross-chain price comparison:`);
+  results.forEach(r => {
+    console.log(`  ${r.network}: ${r.exists ? `$${r.price.toFixed(6)}` : "Not supported"}`);
+  });
+
+  const prices = results.filter(r => r.exists).map(r => r.price);
+  if (prices.length > 1) {
+    const maxDeviation = Math.max(...prices) - Math.min(...prices);
+    const pctDeviation = (maxDeviation / prices[0] * 100).toFixed(4);
+    console.log(`  Max cross-chain deviation: ${pctDeviation}%`);
+    console.log(`  Status: ${parseFloat(pctDeviation) < 0.1 ? "✓ Consistent" : "⚠ Investigate"}`);
+  }
+}
+
+crossChainVerification(
+  "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d",
+  "USDT/USD"
+);
+```
+
+**Expected result:** Cross-chain price deviation should be below **0.1%** under normal conditions. Larger deviations may indicate a network-specific relayer delay and warrant investigation.
+
+---
+
+## Method 5: Contract Authenticity Verification
+
+Verify that the contract at the published address matches the audited source code.
+
+<Steps>
+  <Step title="Get the audited commit hash">
+    The audited commit is documented in the [AdForensics Audit Summary](/adforensics-audit-summary):
+
+    ```text
+        17f7ffc31a9818f35977ad042986cb72820d513b
+    ```
+  </Step>
+  <Step title="Clone the repository at that commit">
+    ```bash
+        git clone https://github.com/IFA-Labs/oracle_contract.git
+        cd oracle_contract
+        git checkout 17f7ffc31a9818f35977ad042986cb72820d513b
+    ```
+  </Step>
+  <Step title="Compile the contract">
+    ```bash
+        forge build
+    ```
+
+    Note the bytecode hash of the compiled output.
+  </Step>
+  <Step title="Compare against deployed bytecode">
+    ```bash
+        # Get deployed bytecode from Base Mainnet
+        cast code 0xA9F17344689C2c2328F94464998db1d3e35B80dC \
+          --rpc-url https://mainnet.base.org
+    ```
+
+    Compare the deployed bytecode against your locally compiled output. A match confirms the deployed contract was compiled from the audited source.
+  </Step>
+  <Step title="Alternative — use Basescan verification">
+    Basescan's verified contract badge independently confirms the deployed bytecode matches the submitted source. View the verification status at: [basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC#code](https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC#code)
+  </Step>
+</Steps>
+
+---
+
+## Reporting a Discrepancy
+
+If any verification method returns a result that cannot be explained by normal oracle update timing or known market events, report it immediately:
+
+- **Email:** [support@ifalabs.com](mailto:support@ifalabs.com)
+- **Telegram:** [t.me/ifalabs](https://t.me/ifalabs)
+- **GitHub:** [IFA-Labs/oracle\_contract/issues](https://github.com/IFA-Labs/oracle_contract/issues)
+
+Include:
+
+- The asset and network where the discrepancy was observed
+- The on-chain price at the time of observation
+- The external market price you compared against
+- The transaction hash or block number of the relevant update
+- The output of any verification scripts you ran
+
+Prompt reporting of genuine discrepancies helps protect every protocol building on IFÁ Labs infrastructure.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Report a Vulnerability" icon="bug" href="/report-a-vulnerability">
+    Responsible disclosure policy and contact channels for security issues.
+  </Card>
+
+  <Card title="Running Price Monitoring" icon="chart-line" href="/running-price-monitoring">
+    Automate ongoing verification with production monitoring scripts.
+  </Card>
+</CardGroup>

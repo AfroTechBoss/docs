@@ -1,0 +1,419 @@
+---
+title: "MCP Client Compatibility"
+description: "Detailed compatibility notes, configuration differences, and known limitations for every MCP client supported by the IFÁ Labs MCP Server."
+---
+
+The IFÁ Labs MCP Server implements the Model Context Protocol specification and is compatible with any client that supports stdio-based MCP servers. This page documents the specific configuration details, behavioural differences, and known limitations for every officially supported client.
+
+---
+
+## Compatibility Matrix
+
+| Client | Version Required | Transport | Auto Tool Call | Streaming | Status |
+| --- | --- | --- | --- | --- | --- |
+| Claude Desktop | Latest | stdio | ✓ | ✓ | Full support |
+| Cursor | 0.40\+ | stdio | ✓ | ✓ | Full support |
+| Windsurf | Latest | stdio | ✓ | ✓ | Full support |
+| TRAE | Latest | stdio | ✓ | ✓ | Full support |
+| Zed | 0.150\+ | stdio | ✓ | Partial | Full support |
+| Continue | 0.8\+ | stdio | ✓ | ✓ | Full support |
+| LangChain | Latest | stdio / SSE | Manual | ✓ | Full support |
+| CrewAI | Latest | stdio | Manual | ✓ | Full support |
+| AutoGen | Latest | stdio | Manual | ✓ | Full support |
+| Custom MCP Client | MCP spec 2024-11\+ | stdio / SSE | Varies | Varies | Compatible |
+
+**Auto Tool Call** — the client automatically decides when to call MCP tools based on the user's prompt, without requiring explicit tool invocation syntax.
+
+**Streaming** — the client streams tool results progressively rather than waiting for the full response before rendering.
+
+---
+
+## Claude Desktop
+
+### Configuration
+
+```json
+{
+  "mcpServers": {
+    "ifalabs": {
+      "command": "ifa-mcp",
+      "args": ["--network", "base-mainnet"]
+    }
+  }
+}
+```
+
+Config file location:
+
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+- **Linux:** `~/.config/Claude/claude_desktop_config.json`
+
+### Behaviour
+
+Claude Desktop has the most natural MCP integration of any client. Tool calls are triggered automatically based on conversational context — you do not need to name tools or use special syntax. Asking "what is the CNGN price?" is sufficient for Claude to identify and call `get_asset_price` with the correct parameters.
+
+Tool results are rendered inline in the conversation with full formatting support. Multi-tool workflows — where Claude calls several tools in sequence to answer a complex question — work seamlessly and the reasoning is transparent to the user.
+
+### Known Limitations
+
+- **Configuration requires a full restart.** Changes to `claude_desktop_config.json` are not picked up until Claude Desktop is fully quit and relaunched. A settings reload is not sufficient.
+- **One active config file.** Claude Desktop reads from a single config file. If you need to switch between mainnet and testnet configurations, update the `--network` argument in the config file and restart.
+- **No project-level config.** Unlike Cursor, Claude Desktop does not support project-scoped MCP configuration. The config file is global.
+
+---
+
+## Cursor
+
+### Configuration
+
+**Global (applies to all projects):**
+
+Go to **Cursor Settings** → **Features** → **MCP Servers** → **Add New MCP Server**:
+
+- **Name:** `ifalabs`
+- **Type:** `command`
+- **Command:** `ifa-mcp --network base-mainnet`
+
+**Project-level (recommended for teams):**
+
+Create `.cursor/mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "ifalabs": {
+      "command": "ifa-mcp",
+      "args": ["--network", "base-mainnet"]
+    }
+  }
+}
+```
+
+Project-level config takes precedence over global settings when both are present.
+
+### Behaviour
+
+Cursor integrates MCP tools into both its chat panel and its inline Composer. Tool calls are triggered automatically when the model determines they are relevant. In Composer, IFÁ Labs tools are particularly useful mid-coding — for example, verifying an asset ID while writing a Solidity constant, or checking feed freshness before generating a deployment script.
+
+### Known Limitations
+
+- **Composer context window.** In long Composer sessions, the model may not trigger MCP tool calls if the context window is heavily loaded with code. Start a fresh Composer session if tool calls stop firing unexpectedly.
+- **Tool approval prompt.** Depending on your Cursor settings, the first tool call in a session may require explicit approval before executing. This is a Cursor privacy setting, not an IFÁ Labs limitation.
+- **Project config requires Cursor restart.** Changes to `.cursor/mcp.json` require a full Cursor restart to take effect.
+
+---
+
+## Windsurf
+
+### Configuration
+
+Go to **Windsurf Settings** → **MCP** → **Add Server**:
+
+```json
+{
+  "mcpServers": {
+    "ifalabs": {
+      "command": "ifa-mcp",
+      "args": ["--network", "base-mainnet"]
+    }
+  }
+}
+```
+
+### Behaviour
+
+Windsurf's Cascade AI integrates MCP tools directly into its agentic workflow. IFÁ Labs tools are available in both Chat and Write modes. In Write mode, Cascade can query live prices mid-task — for example, fetching current stablecoin rates while generating a price-sensitive contract — and incorporate the results directly into generated code.
+
+### Known Limitations
+
+- **Write mode tool calls are non-interactive.** In Windsurf's Write mode, tool results are used by the model directly without surfacing them to the user as intermediate steps. If you need to see raw tool output, use Chat mode.
+- **Server restart required after config change.** Like other clients, Windsurf requires a full restart after MCP config changes.
+
+---
+
+## TRAE
+
+### Configuration
+
+Go to **TRAE Settings** → **MCP Servers** → **Add Server**:
+
+```json
+{
+  "mcpServers": {
+    "ifalabs": {
+      "command": "ifa-mcp",
+      "args": ["--network", "base-mainnet"]
+    }
+  }
+}
+```
+
+### Behaviour
+
+TRAE supports MCP tools in its AI chat panel. Tool calls are triggered automatically from natural language prompts. TRAE is particularly effective for rapid development queries — asset ID lookups, price spot checks, and network configuration verification — without interrupting the coding workflow.
+
+### Known Limitations
+
+- **Tool result formatting.** TRAE renders MCP tool results as plain text without markdown formatting. Structured output like price tables will display as unformatted text. This is a TRAE rendering limitation, not a server issue.
+- **Restart required after config changes.**
+
+---
+
+## Zed
+
+### Configuration
+
+Add the following to your Zed `settings.json`:
+
+```json
+{
+  "context_servers": {
+    "ifalabs": {
+      "command": {
+        "path": "ifa-mcp",
+        "args": ["--network", "base-mainnet"]
+      }
+    }
+  }
+}
+```
+
+### Behaviour
+
+Zed supports MCP servers as context servers within its AI assistant panel. IFÁ Labs tools are available in Zed's AI chat. Tool calls are triggered automatically from natural language.
+
+### Known Limitations
+
+- **Partial streaming support.** Zed's context server implementation streams text responses but may not stream intermediate tool call results progressively. Full results appear once the tool call completes.
+- **Zed version requirement.** MCP context server support requires Zed 0.150 or higher. Earlier versions do not support the MCP stdio transport.
+- **No project-level config.** Zed MCP configuration is global, set in the user-level `settings.json`.
+
+---
+
+## Continue
+
+### Configuration
+
+Add to your Continue `config.json`:
+
+```json
+{
+  "mcpServers": [
+    {
+      "name": "ifalabs",
+      "command": "ifa-mcp",
+      "args": ["--network", "base-mainnet"]
+    }
+  ]
+}
+```
+
+Config file location: `~/.continue/config.json`
+
+### Behaviour
+
+Continue integrates MCP tools into its chat sidebar in VS Code and JetBrains IDEs. IFÁ Labs tools work in Continue's chat context — price lookups, asset ID resolution, and freshness checks are available directly from the editor sidebar without switching windows.
+
+### Known Limitations
+
+- **IDE restart may be required.** Depending on your IDE and Continue version, MCP config changes may require a full IDE restart rather than just a Continue reload.
+- **JetBrains support is newer.** Continue's MCP integration is more mature in VS Code. JetBrains users may encounter occasional tool call failures in complex multi-step workflows. If issues occur, retry the prompt.
+
+---
+
+## LangChain
+
+### Configuration
+
+Connect programmatically using the MCP SDK:
+
+```javascript
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { ChatAnthropic } from "@langchain/anthropic";
+import { tool } from "@langchain/core/tools";
+
+// Connect to IFÁ Labs MCP Server
+const transport = new StdioClientTransport({
+  command: "ifa-mcp",
+  args: ["--network", "base-mainnet"],
+});
+
+const mcpClient = new Client(
+  { name: "langchain-agent", version: "1.0.0" },
+  { capabilities: {} }
+);
+
+await mcpClient.connect(transport);
+
+// Discover available tools
+const { tools: mcpTools } = await mcpClient.listTools();
+
+// Convert MCP tools to LangChain tool format
+const langchainTools = mcpTools.map((mcpTool) =>
+  tool(
+    async (input) => {
+      const result = await mcpClient.callTool({
+        name: mcpTool.name,
+        arguments: input,
+      });
+      return JSON.stringify(result.content);
+    },
+    {
+      name: mcpTool.name,
+      description: mcpTool.description,
+      schema: mcpTool.inputSchema,
+    }
+  )
+);
+
+// Use with a LangChain agent
+const model = new ChatAnthropic({ model: "claude-sonnet-4-20250514" });
+const agentWithTools = model.bindTools(langchainTools);
+```
+
+### Behaviour
+
+LangChain does not call MCP tools automatically — tool calls must be wired explicitly into your agent's tool loop. The example above shows how to discover IFÁ Labs tools dynamically at runtime and bind them to a LangChain model.
+
+### Known Limitations
+
+- **Manual tool loop required.** Unlike GUI clients, LangChain requires you to implement the tool execution loop explicitly. Tool calls are not automatic.
+- **Schema compatibility.** LangChain's tool schema format differs slightly from the raw MCP schema. The conversion pattern shown above handles this correctly — do not pass raw MCP tool definitions directly to LangChain without conversion.
+
+---
+
+## CrewAI
+
+### Configuration
+
+```python
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+from crewai_tools import tool
+import asyncio
+import json
+
+server_params = StdioServerParameters(
+    command="ifa-mcp",
+    args=["--network", "base-mainnet"],
+)
+
+async def call_ifa_tool(tool_name: str, arguments: dict) -> dict:
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool(tool_name, arguments)
+            return json.loads(result.content[0].text)
+
+@tool("Get IFA Labs Asset Price")
+def get_ifa_price(asset: str) -> str:
+    """Fetch a live stablecoin price from IFÁ Labs oracle on Base Mainnet."""
+    result = asyncio.run(call_ifa_tool("get_asset_price", {"asset": asset}))
+    return f"{result['asset']}: ${result['price']} (updated {result['age_seconds']}s ago)"
+```
+
+### Known Limitations
+
+- **Async bridging.** CrewAI tools are synchronous by default. The `asyncio.run` pattern shown above bridges the async MCP client into a synchronous CrewAI tool. For production agents, consider using an async CrewAI setup to avoid event loop conflicts.
+- **One session per call.** The example above opens a new MCP session for every tool call. For high-frequency agents, implement a persistent session with connection pooling.
+
+---
+
+## AutoGen
+
+### Configuration
+
+```python
+from autogen import AssistantAgent, UserProxyAgent
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+import asyncio
+import json
+
+server_params = StdioServerParameters(
+    command="ifa-mcp",
+    args=["--network", "base-mainnet"],
+)
+
+async def get_ifa_price(asset: str, network: str = "base-mainnet") -> dict:
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool(
+                "get_asset_price",
+                {"asset": asset, "network": network}
+            )
+            return json.loads(result.content[0].text)
+
+# Register as an AutoGen function tool
+llm_config = {
+    "functions": [
+        {
+            "name": "get_ifa_price",
+            "description": "Fetch a live stablecoin price from the IFÁ Labs oracle.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "asset": {
+                        "type": "string",
+                        "description": "Asset symbol e.g. USDT/USD, CNGN/USD"
+                    },
+                    "network": {
+                        "type": "string",
+                        "description": "Target network. Defaults to base-mainnet."
+                    }
+                },
+                "required": ["asset"]
+            }
+        }
+    ]
+}
+```
+
+### Known Limitations
+
+- **Function registration is per-tool.** AutoGen requires each MCP tool to be registered individually as a function. For full IFÁ Labs tool coverage, register all seven tools using the pattern above.
+- **Async session management.** Same async bridging considerations as CrewAI apply here.
+
+---
+
+## General Compatibility Notes
+
+**Any MCP-compatible client not listed above** can connect to the IFÁ Labs MCP Server using the standard stdio transport configuration:
+
+```json
+{
+  "command": "ifa-mcp",
+  "args": ["--network", "base-mainnet"]
+}
+```
+
+The server implements MCP specification version `2024-11-05` and later. Clients implementing earlier versions of the spec may encounter compatibility issues. If your client supports SSE transport in addition to stdio, both are supported — use `--transport sse --port 3000` for SSE mode.
+
+---
+
+## Reporting Compatibility Issues
+
+If you encounter a compatibility issue with a client not documented here, or a regression in a supported client after an update:
+
+- **GitHub:** [IFA-Labs/oracle\_contract/issues](https://github.com/IFA-Labs/oracle_contract/issues) — open an issue with your client name, version, operating system, and the error output from `ifa-mcp --log-level debug`
+- **Telegram:** [t.me/ifalabs](https://t.me/ifalabs)
+- **Email:** [support@ifalabs.com](mailto:support@ifalabs.com)
+
+Include the output of `ifa-mcp --version` and your client version in all reports.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core Concepts" icon="book" href="/how-ifa-aggregates-prices">
+    Understand the oracle mechanics behind the price data your integrations consume.
+  </Card>
+
+  <Card title="Example Queries" icon="message" href="/example-queries">
+    Practical prompts and workflows for every MCP client and use case.
+  </Card>
+</CardGroup>

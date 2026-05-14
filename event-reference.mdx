@@ -1,0 +1,367 @@
+---
+title: "Event Reference"
+description: "Events emitted by the IFÁ Labs oracle contract — for monitoring, indexing, alerting, and building off-chain infrastructure."
+---
+
+The IFÁ Labs oracle contract emits events on every successful price update. These events are the foundation of any off-chain infrastructure built on top of IFÁ Labs — monitoring systems, subgraphs, alert pipelines, analytics dashboards, and historical price databases all depend on them.
+
+This page documents every event, its parameters, and how to consume it correctly in JavaScript, Python, and via on-chain indexing tools.
+
+---
+
+## Events
+
+### `PriceUpdated`
+
+Emitted every time a price is successfully pushed on-chain by the relayer network.
+
+```solidity
+event PriceUpdated(
+    bytes32 indexed assetId,
+    int256          price,
+    int8            decimal,
+    uint64          timestamp
+);
+```
+
+**Parameters:**
+
+| Parameter | Type | Indexed | Description |
+| --- | --- | --- | --- |
+| `assetId` | `bytes32` | Yes | The asset identifier — `keccak256(abi.encodePacked("SYMBOL/USD"))`. Indexed for efficient log filtering. |
+| `price` | `int256` | No | The new scaled price value stored on-chain. |
+| `decimal` | `int8` | No | Negative scaling exponent — typically `-18` for all current feeds. |
+| `timestamp` | `uint64` | No | The block timestamp at the time of submission. Matches `lastUpdateTime` returned by `getAssetInfo`. |
+
+**When it fires:**
+
+- On every successful deviation-triggered update
+- On every successful heartbeat-triggered update
+- Never fires on failed or rejected submissions
+
+**Key properties:**
+
+- `assetId` is indexed — you can filter logs for a specific asset without downloading all events
+- `timestamp` matches the `lastUpdateTime` field returned by `getAssetInfo` — the two values are always in sync
+- One event is emitted per asset per update — batch submissions emit one event per asset
+
+---
+
+## Listening to Events
+
+### JavaScript — Real-Time with ethers.js
+
+Listen for live price updates as they happen on-chain:
+
+```javascript
+const { ethers } = require("ethers");
+
+const ORACLE_ADDRESS = "0xA9F17344689C2c2328F94464998db1d3e35B80dC";
+const RPC_WSS = "wss://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY";
+
+const ABI = [
+  "event PriceUpdated(bytes32 indexed assetId, int256 price, int8 decimal, uint64 timestamp)"
+];
+
+const provider = new ethers.WebSocketProvider(RPC_WSS);
+const oracle   = new ethers.Contract(ORACLE_ADDRESS, ABI, provider);
+
+// Asset IDs to monitor
+const WATCHED_ASSETS = {
+  "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d": "USDT/USD",
+  "0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d": "USDC/USD",
+  "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a": "CNGN/USD",
+  "0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8": "ZARP/USD",
+  "0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5": "BRZ/USD",
+  "0x8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0": "ETH/USD",
+};
+
+oracle.on("PriceUpdated", (assetId, price, decimal, timestamp, event) => {
+  const symbol     = WATCHED_ASSETS[assetId] ?? `Unknown (${assetId.slice(0, 10)}...)`;
+  const exponent   = -Number(decimal);
+  const humanPrice = (Number(price) / 10 ** exponent).toFixed(6);
+  const updatedAt  = new Date(Number(timestamp) * 1000).toISOString();
+
+  console.log(`[${updatedAt}] ${symbol}: $${humanPrice}`);
+  console.log(`  tx: ${event.log.transactionHash}`);
+});
+
+console.log("Listening for IFÁ Labs price updates on Base Mainnet...");
+```
+
+<Note>
+  WebSocket connections are required for real-time event listening. HTTP RPC providers do not support `eth_subscribe`. Use a dedicated WebSocket provider — Alchemy, QuickNode, or Infura — not the public Base RPC endpoint.
+</Note>
+
+---
+
+### JavaScript — Historical Query with ethers.js
+
+Query past price update events for a specific asset over a block range:
+
+```javascript
+const { ethers } = require("ethers");
+
+const ORACLE_ADDRESS = "0xA9F17344689C2c2328F94464998db1d3e35B80dC";
+const provider = new ethers.JsonRpcProvider("https://mainnet.base.org");
+
+const ABI = [
+  "event PriceUpdated(bytes32 indexed assetId, int256 price, int8 decimal, uint64 timestamp)"
+];
+
+const oracle = new ethers.Contract(ORACLE_ADDRESS, ABI, provider);
+
+const CNGN_ASSET_ID =
+  "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a";
+
+async function getPriceHistory(assetId, lookbackBlocks = 50000) {
+  const currentBlock = await provider.getBlockNumber();
+  const fromBlock    = currentBlock - lookbackBlocks;
+
+  console.log(`Fetching CNGN/USD history from block ${fromBlock} to ${currentBlock}...`);
+
+  const events = await oracle.queryFilter(
+    oracle.filters.PriceUpdated(assetId),
+    fromBlock,
+    currentBlock
+  );
+
+  const history = events.map(event => ({
+    blockNumber:  event.blockNumber,
+    txHash:       event.transactionHash,
+    price:        (Number(event.args.price) / 1e18).toFixed(6),
+    timestamp:    new Date(Number(event.args.timestamp) * 1000).toISOString(),
+  }));
+
+  console.log(`Found ${history.length} updates:`);
+  history.forEach(h => {
+    console.log(`  Block ${h.blockNumber} | ${h.timestamp} | $${h.price}`);
+  });
+
+  return history;
+}
+
+getPriceHistory(CNGN_ASSET_ID);
+```
+
+---
+
+### Python — Real-Time with web3.py
+
+```python
+from web3 import Web3
+from web3.middleware import ExtraDataToPOAMiddleware
+import json
+import time
+
+RPC_WSS       = "wss://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
+ORACLE_ADDRESS = "0xA9F17344689C2c2328F94464998db1d3e35B80dC"
+
+ABI = json.loads('[{"anonymous":false,"inputs":[{"indexed":true,"name":"assetId","type":"bytes32"},{"indexed":false,"name":"price","type":"int256"},{"indexed":false,"name":"decimal","type":"int8"},{"indexed":false,"name":"timestamp","type":"uint64"}],"name":"PriceUpdated","type":"event"}]')
+
+ASSET_SYMBOLS = {
+    "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d": "USDT/USD",
+    "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a": "CNGN/USD",
+    "0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8": "ZARP/USD",
+}
+
+w3     = Web3(Web3.WebsocketProvider(RPC_WSS))
+oracle = w3.eth.contract(address=ORACLE_ADDRESS, abi=ABI)
+
+def handle_price_update(event):
+    asset_id    = event["args"]["assetId"].hex()
+    price       = event["args"]["price"]
+    decimal     = event["args"]["decimal"]
+    timestamp   = event["args"]["timestamp"]
+    symbol      = ASSET_SYMBOLS.get(f"0x{asset_id}", f"Unknown ({asset_id[:10]}...)")
+    human_price = price / (10 ** -decimal)
+
+    print(f"[{symbol}] ${human_price:.6f} at {timestamp}")
+
+event_filter = oracle.events.PriceUpdated.create_filter(from_block="latest")
+
+print("Listening for IFÁ Labs price updates...")
+while True:
+    for event in event_filter.get_new_entries():
+        handle_price_update(event)
+    time.sleep(2)
+```
+
+---
+
+### Basescan — Manual Event Inspection
+
+To inspect price update events without writing code:
+
+<Steps>
+  <Step title="Open the Events tab">
+    Go to the contract on Basescan and click the **Events** tab: [basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC#events](https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC#events)
+  </Step>
+  <Step title="Filter by asset ID">
+    Use the topic filter to narrow results to a specific asset. The `assetId` parameter is indexed — enter the `bytes32` value for the asset you want to inspect as Topic 1.
+  </Step>
+  <Step title="Read the event data">
+    Each row shows the transaction hash, block number, and decoded event parameters — `price`, `decimal`, and `timestamp`. The `price` field is the raw scaled integer — divide by `1e18` for the human-readable value.
+  </Step>
+</Steps>
+
+---
+
+## Building a Price History Database
+
+For analytics dashboards, historical price charts, or audit trails, persist `PriceUpdated` events to a database as they arrive:
+
+```javascript
+const { ethers } = require("ethers");
+const { Pool }   = require("pg"); // PostgreSQL client
+
+const db = new Pool({ connectionString: process.env.DATABASE_URL });
+
+// Create table if not exists
+await db.query(`
+  CREATE TABLE IF NOT EXISTS price_updates (
+    id           SERIAL PRIMARY KEY,
+    asset_id     TEXT        NOT NULL,
+    symbol       TEXT,
+    price        NUMERIC     NOT NULL,
+    raw_price    TEXT        NOT NULL,
+    decimal      INTEGER     NOT NULL,
+    block_number BIGINT      NOT NULL,
+    tx_hash      TEXT        NOT NULL,
+    updated_at   TIMESTAMPTZ NOT NULL,
+    created_at   TIMESTAMPTZ DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_price_updates_asset_id
+    ON price_updates(asset_id);
+
+  CREATE INDEX IF NOT EXISTS idx_price_updates_updated_at
+    ON price_updates(updated_at DESC);
+`);
+
+const ASSET_SYMBOLS = {
+  "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d": "USDT/USD",
+  "0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d": "USDC/USD",
+  "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a": "CNGN/USD",
+  "0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8": "ZARP/USD",
+  "0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5": "BRZ/USD",
+  "0x8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0": "ETH/USD",
+};
+
+oracle.on("PriceUpdated", async (assetId, price, decimal, timestamp, event) => {
+  const exponent   = -Number(decimal);
+  const humanPrice = Number(price) / 10 ** exponent;
+
+  await db.query(
+    `INSERT INTO price_updates
+      (asset_id, symbol, price, raw_price, decimal, block_number, tx_hash, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8))`,
+    [
+      assetId,
+      ASSET_SYMBOLS[assetId] ?? null,
+      humanPrice,
+      price.toString(),
+      Number(decimal),
+      event.log.blockNumber,
+      event.log.transactionHash,
+      Number(timestamp),
+    ]
+  );
+
+  console.log(`Persisted: ${ASSET_SYMBOLS[assetId]} = $${humanPrice.toFixed(6)}`);
+});
+```
+
+---
+
+## Indexing with The Graph
+
+For production-grade historical data access, index `PriceUpdated` events using The Graph:
+
+```typescript
+// schema.graphql
+type PriceUpdate @entity {
+  id:          ID!
+  assetId:     Bytes!
+  symbol:      String
+  price:       BigInt!
+  decimal:     Int!
+  humanPrice:  BigDecimal!
+  timestamp:   BigInt!
+  blockNumber: BigInt!
+  txHash:      Bytes!
+}
+```
+
+```typescript
+// mapping.ts
+import { PriceUpdated } from "../generated/IfaPriceFeed/IfaPriceFeed";
+import { PriceUpdate }  from "../generated/schema";
+import { BigDecimal, BigInt } from "@graphprotocol/graph-ts";
+
+const ASSET_SYMBOLS = new Map<string, string>();
+ASSET_SYMBOLS.set(
+  "0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d",
+  "USDT/USD"
+);
+ASSET_SYMBOLS.set(
+  "0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a",
+  "CNGN/USD"
+);
+ASSET_SYMBOLS.set(
+  "0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8",
+  "ZARP/USD"
+);
+
+export function handlePriceUpdated(event: PriceUpdated): void {
+  const id     = event.transaction.hash.toHex() + "-" + event.logIndex.toString();
+  const update = new PriceUpdate(id);
+
+  const exponent  = BigInt.fromI32(-event.params.decimal);
+  const divisor   = BigInt.fromI32(10).pow(exponent.toI32() as u8);
+  const humanPrice = new BigDecimal(event.params.price).div(
+    new BigDecimal(divisor)
+  );
+
+  update.assetId     = event.params.assetId;
+  update.symbol      = ASSET_SYMBOLS.has(event.params.assetId.toHex())
+                         ? ASSET_SYMBOLS.get(event.params.assetId.toHex())
+                         : null;
+  update.price       = event.params.price;
+  update.decimal     = event.params.decimal;
+  update.humanPrice  = humanPrice;
+  update.timestamp   = event.params.timestamp;
+  update.blockNumber = event.block.number;
+  update.txHash      = event.transaction.hash;
+
+  update.save();
+}
+```
+
+---
+
+## Event Monitoring Best Practices
+
+**Use WebSockets for real-time feeds, HTTP for historical queries.** WebSocket providers support `eth_subscribe` for live event streaming. HTTP providers require polling with `queryFilter` — adequate for historical data but not for real-time monitoring.
+
+**Store raw values alongside human-readable values.** Always persist both `raw_price` (the unscaled `int256`) and the human-readable price in your database. The raw value is lossless — the human-readable conversion may lose precision depending on your numeric type. If you ever need to reprocess historical data, the raw value is the authoritative source.
+
+**Index by `assetId` and `updated_at`.** These are the two axes on which you will query price history — "all updates for CNGN/USD" and "all updates in the last 24 hours." Both should be indexed in your database for acceptable query performance at scale.
+
+**Handle WebSocket reconnections.** WebSocket connections to RPC providers drop periodically. Any production event listener must implement reconnection logic — either manually or through a library that handles it automatically.
+
+**Backfill from genesis block on first deployment.** When deploying a price history database for the first time, backfill all historical `PriceUpdated` events from the oracle contract's deployment block before switching to live streaming. Otherwise your historical data will have a gap.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="ABI Download" icon="download" href="/abi-download">
+    Get the official ABI for use in your monitoring scripts and indexers.
+  </Card>
+
+  <Card title="Running Price Monitoring" icon="chart-line" href="/running-price-monitoring">
+    Production-ready monitoring scripts built on the event patterns documented here.
+  </Card>
+</CardGroup>

@@ -1,0 +1,345 @@
+---
+title: "Decimal Precision & Formatting"
+description: "How IFÁ Labs scales and formats price data for on-chain storage — and how to convert it correctly in Solidity, JavaScript, and Python."
+---
+
+IFÁ Labs stores prices on-chain as scaled integers. Solidity does not support floating-point arithmetic, so decimal values like `$1.000124` are represented as large integers with a separate scaling exponent. Understanding this representation is essential for reading prices correctly — a single formatting error turns `$1.00` into `$1,000,000,000,000,000,000`.
+
+This page covers the scaling model, how to convert prices in every relevant language and environment, and the edge cases worth knowing before you go to production.
+
+---
+
+## The Scaling Model
+
+Every price returned by `getAssetInfo` consists of two fields that work together:
+
+| Field | Type | Example Value | Meaning |
+| --- | --- | --- | --- |
+| `price` | `int256` | `1000124000000000000` | Scaled integer representation of the price |
+| `decimal` | `int8` | `-18` | Negative exponent — divide `price` by `10^(-decimal)` to get the human-readable value |
+
+**The conversion formula:**
+
+```text
+human_readable_price = price ÷ 10^(-decimal)
+```
+
+**Example — USDT at \$1.000124:**
+
+```text
+price:    1000124000000000000
+decimal:  -18
+
+human_readable = 1000124000000000000 ÷ 10^18
+               = 1.000124
+```
+
+**Example — CNGN at \$0.000613:**
+
+```text
+price:    613000000000000
+decimal:  -18
+
+human_readable = 613000000000000 ÷ 10^18
+               = 0.000613
+```
+
+---
+
+## Why Negative Decimals
+
+The `decimal` field uses a negative exponent convention — `-18` means "divide by 10^18", not "multiply by 10^(-18)". This is a deliberate design choice that aligns with common EVM fixed-point conventions:
+
+- `decimal = -18` → divide by `1e18` → 18 decimal places of precision
+- `decimal = -8` → divide by `1e8` → 8 decimal places of precision
+- `decimal = -6` → divide by `1e6` → 6 decimal places of precision
+
+All current IFÁ Labs stablecoin feeds use `decimal = -18`. ETH/USD also uses `decimal = -18`. This is unlikely to change for existing feeds, but always read `decimal` dynamically rather than hardcoding `18` — future feeds for assets with different precision requirements may use different values.
+
+---
+
+## Converting Prices in Solidity
+
+### Fixed Decimal (Production Pattern)
+
+For current feeds where `decimal = -18` is known and constant:
+
+```solidity
+// Assumes decimal = -18 (all current IFÁ Labs feeds)
+function toHumanReadable(int256 price) internal pure returns (uint256) {
+    require(price > 0, "Price must be positive");
+    return uint256(price) / 1e18;
+}
+```
+
+**Limitation:** This returns an integer — `$1.000124` becomes `1`, not `1000124000000000000`. For display or integer math where full precision isn't needed, this is fine. For precise financial calculations, use the raw `price` value directly without converting.
+
+---
+
+### Dynamic Decimal (Future-Proof Pattern)
+
+For protocols that want to handle any `decimal` value without hardcoding:
+
+```solidity
+function scalePrice(int256 price, int8 decimal)
+    internal
+    pure
+    returns (uint256 scaled)
+{
+    require(price > 0, "Price must be positive");
+    require(decimal < 0, "Only negative decimals supported");
+
+    uint8 exponent = uint8(-decimal);
+    return uint256(price) / (10 ** exponent);
+}
+```
+
+---
+
+### Preserving Precision in Fixed-Point Math
+
+If your protocol does financial calculations with oracle prices — collateral valuation, liquidation ratios, fee computation — do not convert to human-readable format first. Work with the raw scaled integer to preserve full precision:
+
+```solidity
+/// @notice Calculate the USD value of a token amount
+/// @param tokenAmount   Raw token amount (18 decimal places)
+/// @param oraclePrice   Raw price from IFÁ Labs (scaled by 1e18)
+/// @return usdValue     USD value scaled by 1e18
+function calculateUSDValue(
+    uint256 tokenAmount,
+    int256  oraclePrice
+)
+    internal
+    pure
+    returns (uint256 usdValue)
+{
+    require(oraclePrice > 0, "Invalid price");
+
+    // Both tokenAmount and oraclePrice are scaled by 1e18
+    // Multiply then divide to preserve precision
+    usdValue = tokenAmount * uint256(oraclePrice) / 1e18;
+}
+```
+
+<Warning>
+  Never divide first and then multiply. Integer division truncates remainders — dividing first loses precision that cannot be recovered. Always multiply before dividing in fixed-point arithmetic.
+</Warning>
+
+---
+
+### Safe int256 to uint256 Casting
+
+The `price` field is typed as `int256` to allow for future flexibility. All current feeds return positive values, but always guard against the zero and negative cases:
+
+```solidity
+// ✅ Safe cast with guard
+function safeCast(int256 price) internal pure returns (uint256) {
+    require(price > 0, "Price must be positive");
+    return uint256(price);
+}
+
+// ❌ Unsafe — negative int256 cast to uint256 produces a massive number
+uint256 unsafePrice = uint256(price); // wraps if price < 0
+```
+
+---
+
+## Converting Prices in JavaScript
+
+### Basic Conversion with ethers.js
+
+```javascript
+const { ethers } = require("ethers");
+
+function formatPrice(rawPrice, decimal) {
+    // rawPrice is a BigInt from ethers v6
+    // decimal is a number (e.g. -18)
+
+    const exponent = BigInt(-decimal); // convert -18 to 18
+    const divisor  = 10n ** exponent;
+
+    const wholePart      = rawPrice / divisor;
+    const fractionalPart = rawPrice % divisor;
+
+    // Format to 6 decimal places
+    const fractionalStr = fractionalPart
+        .toString()
+        .padStart(Number(exponent), "0")
+        .slice(0, 6);
+
+    return `${wholePart}.${fractionalStr}`;
+}
+
+// Example usage with oracle result
+const [info, exists] = await oracle.getAssetInfo(USDT_ASSET_ID);
+
+if (exists) {
+    const formatted = formatPrice(info.price, info.decimal);
+    console.log(`USDT/USD: $${formatted}`);
+    // USDT/USD: $1.000124
+}
+```
+
+---
+
+### Using ethers formatUnits
+
+For simple display purposes, `ethers.formatUnits` handles the scaling directly:
+
+```javascript
+const { ethers } = require("ethers");
+
+// decimal = -18, so units = 18
+const humanPrice = ethers.formatUnits(info.price, -info.decimal);
+console.log(`Price: $${humanPrice}`);
+// Price: $1.000124
+```
+
+<Tip>
+  `ethers.formatUnits` expects a positive integer for the units argument. Pass `-info.decimal` (negating the negative decimal value) to get the correct exponent. For `decimal = -18`, this gives `18`.
+</Tip>
+
+---
+
+### High-Precision JavaScript with BigInt
+
+For financial applications where floating-point rounding is unacceptable:
+
+```javascript
+function getPriceInBasisPoints(rawPrice, decimal) {
+    // Returns price in basis points (1 USD = 10000 basis points)
+    // Avoids all floating-point arithmetic
+
+    const exponent  = BigInt(-decimal);
+    const divisor   = 10n ** exponent;
+    const bpScaling = 10000n;
+
+    return (rawPrice * bpScaling) / divisor;
+}
+
+const basisPoints = getPriceInBasisPoints(info.price, info.decimal);
+console.log(`USDT/USD: ${basisPoints} basis points`);
+// USDT/USD: 10001 basis points ($1.0001)
+```
+
+---
+
+## Converting Prices in Python
+
+### Basic Conversion
+
+```python
+from decimal import Decimal, getcontext
+
+# Set high precision for financial calculations
+getcontext().prec = 36
+
+def format_price(raw_price: int, decimal: int) -> Decimal:
+    """
+    Convert a raw IFÁ Labs price to a human-readable Decimal.
+
+    Args:
+        raw_price: The raw int256 price value from the oracle
+        decimal:   The decimal field (negative integer, e.g. -18)
+
+    Returns:
+        Human-readable price as a Decimal
+    """
+    if raw_price <= 0:
+        raise ValueError("Price must be positive")
+    if decimal >= 0:
+        raise ValueError("Decimal must be negative")
+
+    exponent = -decimal  # convert -18 to 18
+    divisor  = Decimal(10 ** exponent)
+
+    return Decimal(raw_price) / divisor
+
+# Example
+raw_price = 1000124000000000000
+decimal   = -18
+
+price = format_price(raw_price, decimal)
+print(f"USDT/USD: ${price:.6f}")
+# USDT/USD: $1.000124
+```
+
+---
+
+### Web3.py Integration
+
+```python
+from web3 import Web3
+from decimal import Decimal
+
+RPC_URL       = "https://mainnet.base.org"
+ORACLE_ABI    = [...]  # Load from ifapricefeed-interface package
+ORACLE_ADDRESS = "0xA9F17344689C2c2328F94464998db1d3e35B80dC"
+
+w3      = Web3(Web3.HTTPProvider(RPC_URL))
+oracle  = w3.eth.contract(address=ORACLE_ADDRESS, abi=ORACLE_ABI)
+
+USDT_ASSET_ID = bytes.fromhex(
+    "6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d"
+)
+
+result = oracle.functions.getAssetInfo(USDT_ASSET_ID).call()
+info, exists = result
+
+if exists:
+    exponent     = -info[1]  # decimal field is info[1]
+    human_price  = Decimal(info[0]) / Decimal(10 ** exponent)
+    print(f"USDT/USD: ${human_price:.6f}")
+    # USDT/USD: $1.000124
+```
+
+---
+
+## Precision Reference
+
+For all current IFÁ Labs feeds:
+
+| Asset | Decimal | Divisor | Precision |
+| --- | --- | --- | --- |
+| USDT/USD | -18 | 1e18 | 18 decimal places |
+| USDC/USD | -18 | 1e18 | 18 decimal places |
+| CNGN/USD | -18 | 1e18 | 18 decimal places |
+| ZARP/USD | -18 | 1e18 | 18 decimal places |
+| BRZ/USD | -18 | 1e18 | 18 decimal places |
+| ETH/USD | -18 | 1e18 | 18 decimal places |
+
+All current feeds use 18 decimal places. Always read the `decimal` field dynamically in production code — hardcoding `18` will break if a future asset uses a different precision.
+
+---
+
+## Common Mistakes
+
+**Treating `price` as a human-readable dollar amount.** `1000124000000000000` is not $1,000,124,000,000,000,000. It is $1.000124. Always apply the decimal scaling before displaying or using the value.
+
+**Dividing by a hardcoded constant without reading `decimal`.** If you hardcode `/ 1e18` and a future feed uses `decimal = -8`, your conversion will be wrong by a factor of `10^10`. Read `decimal` from the struct.
+
+**Floating-point arithmetic for financial calculations.** JavaScript's `Number` type has 53 bits of precision. `1000124000000000000` exceeds the safe integer range — use `BigInt` in JavaScript and `Decimal` in Python for any calculations involving raw oracle prices.
+
+**Multiplying two scaled values without normalizing.** If both values are scaled by `1e18`, multiplying them produces a result scaled by `1e36`. You must divide by `1e18` after multiplying to return to `1e18` scale.
+
+```solidity
+// ✅ Correct — normalize after multiplication
+uint256 result = (valueA * valueB) / 1e18;
+
+// ❌ Wrong — result is scaled by 1e36
+uint256 result = valueA * valueB;
+```
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Contract Addresses" icon="file-contract" href="/contract-addresses">
+    Full reference for all deployed oracle contract addresses.
+  </Card>
+
+  <Card title="Function Reference" icon="code" href="/function-reference">
+    Complete API reference for all oracle contract functions.
+  </Card>
+</CardGroup>
