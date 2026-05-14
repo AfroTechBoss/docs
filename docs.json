@@ -1,7 +1,7 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "IFÁLABS",
+  "name": "IFÁ LABS DOCS",
   "colors": {
     "primary": "#7461ec",
     "light": "#958bd4",
@@ -124,7 +124,7 @@
     "links": [
       {
         "label": "Support",
-        "href": "mailto:hi@mintlify.com"
+        "href": "mailto:ifalabstudiog@gmail.com"
       }
     ],
     "primary": {
