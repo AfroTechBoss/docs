@@ -67,7 +67,7 @@ Tool results are rendered inline in the conversation with full formatting suppor
 
 ### Configuration
 
-**Global (applies to all projects):**
+**macOS / Linux — Global (applies to all projects):**
 
 Go to **Cursor Settings** → **Features** → **MCP Servers** → **Add New MCP Server**:
 
@@ -75,22 +75,37 @@ Go to **Cursor Settings** → **Features** → **MCP Servers** → **Add New MCP
 - **Type:** `command`
 - **Command:** `ifa-mcp --network base-mainnet`
 
-**Project-level (recommended for teams):**
-
-Create `.cursor/mcp.json` in your project root:
+**Windows — Option A (recommended): use `node` with the local dist path**
 
 ```json
 {
   "mcpServers": {
     "ifalabs": {
-      "command": "ifa-mcp",
-      "args": ["--network", "base-mainnet"]
+      "command": "node",
+      "args": ["C:/Users/YOUR_USERNAME/OneDrive/Desktop/ifamcpserver/dist/index.js", "--network", "base-mainnet"]
     }
   }
 }
 ```
 
-Project-level config takes precedence over global settings when both are present.
+Replace `YOUR_USERNAME` with your Windows username and adjust the path to match wherever you built the project.
+
+**Windows — Option B: use `npx` (no local path required)**
+
+```json
+{
+  "mcpServers": {
+    "ifalabs": {
+      "command": "npx",
+      "args": ["-y", "@ifalabs/mcp-server", "--network", "base-mainnet"]
+    }
+  }
+}
+```
+
+**Project-level (recommended for teams):**
+
+Create `.cursor/mcp.json` in your project root using the OS-appropriate format above. Project-level config takes precedence over global settings when both are present.
 
 ### Behaviour
 
@@ -98,6 +113,7 @@ Cursor integrates MCP tools into both its chat panel and its inline Composer. To
 
 ### Known Limitations
 
+- **Windows binary resolution.** On Windows, Cursor cannot resolve the global `ifa-mcp` binary because npm wraps global binaries in a `.cmd` file that Cursor does not execute. Use the `node` format with the full path to `dist/index.js`, or use `npx -y @ifalabs/mcp-server` instead. macOS and Linux users can use `ifa-mcp` directly.
 - **Composer context window.** In long Composer sessions, the model may not trigger MCP tool calls if the context window is heavily loaded with code. Start a fresh Composer session if tool calls stop firing unexpectedly.
 - **Tool approval prompt.** Depending on your Cursor settings, the first tool call in a session may require explicit approval before executing. This is a Cursor privacy setting, not an IFÁ Labs limitation.
 - **Project config requires Cursor restart.** Changes to `.cursor/mcp.json` require a full Cursor restart to take effect.
@@ -387,6 +403,15 @@ llm_config = {
 {
   "command": "ifa-mcp",
   "args": ["--network", "base-mainnet"]
+}
+```
+
+**Windows users** on any client should use the `node` or `npx` format if the `ifa-mcp` binary is not resolving:
+
+```json
+{
+  "command": "npx",
+  "args": ["-y", "@ifalabs/mcp-server", "--network", "base-mainnet"]
 }
 ```
 

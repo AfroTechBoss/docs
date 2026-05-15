@@ -13,7 +13,7 @@ Before installing, confirm you have the following:
 
 - **Node.js v18 or higher** — the MCP server is a Node.js process. Check your version with `node --version`.
 - **npm or yarn** — for installation.
-- An MCP-compatible client — Claude Desktop, Cursor, Windsurf, TRAE, or any other listed in [Supported MCP Clients](/integration-guides/mcp-server/what-is-the-ifa-labs-mcp-server#supported-mcp-clients).
+- An MCP-compatible client — Claude Desktop, Cursor, Windsurf, TRAE, or any other listed in [Supported MCP Clients](/what-is-the-ifa-labs-mcp-server).
 
 <Note>
   No wallet, private key, or gas is required to run the IFÁ Labs MCP Server. All oracle reads are view calls — free, read-only, and require no on-chain signing.
@@ -101,11 +101,52 @@ Select your MCP client below and follow the configuration steps.
         Go to **Cursor Settings** → **Features** → **MCP Servers** → **Add New MCP Server**.
       </Step>
       <Step title="Configure the server">
-        Fill in the following fields:
+        Choose the format that matches your operating system:
 
-        - **Name:** `ifalabs`
-        - **Type:** `command`
-        - **Command:** `ifa-mcp --network base-mainnet`
+        **macOS / Linux:**
+
+        ```json
+                {
+                  "mcpServers": {
+                    "ifalabs": {
+                      "command": "ifa-mcp",
+                      "args": ["--network", "base-mainnet"]
+                    }
+                  }
+                }
+        ```
+
+        **Windows — Option A (recommended): use `node` with the local dist path**
+
+        ```json
+                {
+                  "mcpServers": {
+                    "ifalabs": {
+                      "command": "node",
+                      "args": ["C:/Users/YOUR_USERNAME/OneDrive/Desktop/ifamcpserver/dist/index.js", "--network", "base-mainnet"]
+                    }
+                  }
+                }
+        ```
+
+        Replace `YOUR_USERNAME` with your Windows username and adjust the path to match wherever you cloned or built the project.
+
+        **Windows — Option B: use `npx` (no local path required)**
+
+        ```json
+                {
+                  "mcpServers": {
+                    "ifalabs": {
+                      "command": "npx",
+                      "args": ["-y", "@ifalabs/mcp-server", "--network", "base-mainnet"]
+                    }
+                  }
+                }
+        ```
+
+        <Note>
+          On Windows, Cursor cannot resolve the `ifa-mcp` binary directly because npm wraps global binaries in a `.cmd` file that Cursor does not execute. Use the `node` or `npx` format instead. macOS and Linux users can use `ifa-mcp` directly.
+        </Note>
       </Step>
       <Step title="Save and verify">
         Save the settings. Open a new Cursor chat and ask:
@@ -116,7 +157,7 @@ Select your MCP client below and follow the configuration steps.
       </Step>
     </Steps>
 
-    **Alternatively**, add a `.cursor/mcp.json` file to your project root for project-scoped configuration:
+    **Alternatively**, add a `.cursor/mcp.json` file to your project root for project-scoped configuration using the same OS-appropriate format above:
 
     ```json
         {
@@ -186,6 +227,8 @@ Select your MCP client below and follow the configuration steps.
           }
         }
     ```
+
+    **Windows users:** replace `ifa-mcp` with `node` and provide the full path to `dist/index.js`, or use `npx -y @ifalabs/mcp-server` instead.
 
     Refer to your client's documentation for where to place this configuration.
   </Tab>
@@ -275,6 +318,10 @@ const result = await client.callTool({
 console.log(result);
 ```
 
+<Note>
+  Windows users running programmatic integrations should use the `node` command with the full path to `dist/index.js` in the `StdioClientTransport` config, or use `npx` with `-y @ifalabs/mcp-server`.
+</Note>
+
 ---
 
 ## Verifying the Connection
@@ -294,7 +341,9 @@ If any of these fail, work through the [troubleshooting steps](#troubleshooting)
 
 ## Troubleshooting
 
-**`ifa-mcp: command not found`** The global install did not complete successfully or the npm global bin directory is not in your `PATH`. Run `npm list -g @ifalabs/mcp-server` to confirm installation, then check your `PATH` configuration.
+**`ifa-mcp: command not found`** The global install did not complete successfully or the npm global bin directory is not in your `PATH`. Run `npm list -g @ifalabs/mcp-server` to confirm installation, then check your `PATH` configuration. On Windows, use the `node` or `npx` format instead.
+
+**Connection closed immediately on Windows** Cursor and some other clients on Windows cannot resolve the `ifa-mcp` binary. Switch to the `node` format with the full path to `dist/index.js`, or use `npx -y @ifalabs/mcp-server`. See the Cursor tab above for exact config blocks.
 
 **Server appears in client but tools return errors** Confirm the `--network` argument matches a supported network. Check `--log-level info` output for RPC connection errors.
 
