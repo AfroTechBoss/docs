@@ -1,6 +1,6 @@
 ---
 title: "Gas Optimization Tips"
-description: "Practical patterns for minimizing the gas footprint of your IFÁ Labs oracle integration — from constants to batching to caching."
+description: "Practical Solidity patterns for minimizing the gas cost of your IFÁ Labs oracle integration: immutable addresses, batching, caching, and more."
 ---
 
 IFÁ Labs price reads are already among the cheapest external calls you can make in a Solidity contract — `getAssetInfo` is a pure storage read with no computation overhead. But in protocols that read prices frequently, across multiple assets, or inside functions called thousands of times, small inefficiencies compound into real costs.
