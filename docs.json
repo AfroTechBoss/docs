@@ -151,5 +151,9 @@
       "github": "https://github.com/IFA-Labs",
       "linkedin": "https://linkedin.com/company/ifalabs"
     }
+  },
+  "banner": {
+    "content": "This is the first version of our Documentation, it will be improved and extended soon.",
+    "dismissible": true
   }
 }
