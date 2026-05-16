@@ -2,13 +2,13 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
   "name": "IFÁ Labs Documentation",
-  "404": "404",
   "colors": {
     "primary": "#7461ec",
     "light": "#958bd4",
     "dark": "#7461ec"
   },
   "favicon": "/images/Dribbbleshot-4.png",
+  "404": "404",
   "navigation": {
     "groups": [
       {
