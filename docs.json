@@ -129,8 +129,8 @@
     ],
     "primary": {
       "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
+      "label": "Join Community",
+      "href": "https://t.me/ifalabs"
     }
   },
   "contextual": {
