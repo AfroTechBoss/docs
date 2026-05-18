@@ -174,7 +174,7 @@ Errors produced by the recommended integration patterns documented in this guide
 
 **This is correct behaviour.** The oracle returned a valid response — the asset simply is not supported. The error is in the asset ID being passed to your contract, not in the oracle.
 
-**Resolution:** Verify the asset ID using the diagnosis script in [Common Integration Errors](/troubleshooting/common-integration-errors#exists--false).
+**Resolution:** Verify the asset ID using the diagnosis script in [Common Integration Errors](/common-integration-errors#exists--false).
 
 ---
 
@@ -251,7 +251,7 @@ uint256 constant EMERGING_MAX_DEVIATION  = 500;  // 5.0% — CNGN, ZARP, BRZ
 
 **When it fires:** Your batch processing loop checked `exists[i]` and found `false` for one of the assets in a `getAssetsInfo` call.
 
-**Resolution:** Identify which asset ID in your batch returned `exists = false` and debug that specific ID using the diagnosis steps in [Common Integration Errors](/troubleshooting/common-integration-errors#exists--false).
+**Resolution:** Identify which asset ID in your batch returned `exists = false` and debug that specific ID using the diagnosis steps in [Common Integration Errors](/common-integration-errors#exists--false).
 
 ```solidity
 (IIfaPriceFeed.PriceFeed[] memory infos, bool[] memory exists) =
