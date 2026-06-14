@@ -1,0 +1,460 @@
+---
+title: "Read Latest Price (Sui)"
+description: "Fetch live stablecoin prices from the IFÁ Labs oracle on Sui — using Move contracts, the Sui TypeScript SDK, and the Sui CLI."
+---
+
+This page covers how to read price feeds from the IFÁ Labs oracle on Sui Testnet. The integration model is fundamentally different from EVM — instead of calling a contract address, you pass a shared object by reference in a transaction or inspect call.
+
+If you are building on Base Mainnet or another EVM chain, see [Read Latest Price](/read-latest-price) for the Solidity integration guide.
+
+---
+
+## Key Differences from EVM
+
+Before writing any code, understand how Sui differs from EVM for oracle consumption:
+
+| Concept | EVM | Sui |
+| --- | --- | --- |
+| How you read prices | Call `getAssetInfo` on a contract address | Pass `IfaPriceFeed` shared object by reference |
+| Price type | `int256` (signed) | `u256` (unsigned) |
+| Decimal convention | Negative — e.g. `-18` means divide by `10^18` | Positive — e.g. `18` means divide by `10^18` |
+| Derived pair decimal | Per-asset | Always `30` — divide by `10^30` |
+| Missing asset behaviour | Returns `exists = false` | Aborts the transaction |
+| Freshness check | Implement yourself | Built-in `is_fresh` helper available |
+| Asset ID format | `bytes32` hex string | `vector<u8>` — same 32 bytes, no `0x` prefix |
+
+---
+
+## Sui Testnet Object IDs
+
+You need these three values before integrating:
+
+| Object | ID |
+| --- | --- |
+| **Package ID** | `0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f` |
+| **Feed Object ID** | `0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a` |
+| **Verifier Object ID** | `0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5` |
+
+<Warning>
+  Always pass the **Feed Object ID** when reading prices — not the Package ID. The Package ID is only used when importing `ifa_oracle` as a dependency in your own Move package.
+</Warning>
+
+---
+
+## Asset IDs on Sui
+
+Asset IDs are the same 32-byte values as EVM — but formatted differently in Move and TypeScript.
+
+```move
+// Move — use hex literal syntax, no 0x prefix
+use ifa_oracle::bytes32;
+
+let usdt_id = bytes32::new(x"6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d");
+let usdc_id = bytes32::new(x"f989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d");
+let cngn_id = bytes32::new(x"83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a");
+let zarp_id = bytes32::new(x"12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8");
+let brz_id  = bytes32::new(x"bc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5");
+let eth_id  = bytes32::new(x"8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0");
+```
+
+```typescript
+// TypeScript — convert hex to byte array, no 0x prefix
+const ASSET_IDS = {
+  "USDT/USD": Array.from(Buffer.from("6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d", "hex")),
+  "USDC/USD": Array.from(Buffer.from("f989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d", "hex")),
+  "CNGN/USD": Array.from(Buffer.from("83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a", "hex")),
+  "ZARP/USD": Array.from(Buffer.from("12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8", "hex")),
+  "BRZ/USD":  Array.from(Buffer.from("bc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5", "hex")),
+  "ETH/USD":  Array.from(Buffer.from("8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0", "hex")),
+};
+```
+
+---
+
+## Reading a Price in Move
+
+### Single Asset
+
+```move
+module my_protocol::price_reader;
+
+use ifa_oracle::bytes32;
+use ifa_oracle::price_feed::{Self, IfaPriceFeed};
+
+/// Read the USDT/USD price from IFÁ Labs
+/// feed: pass the IfaPriceFeed shared object by reference
+public fun get_usdt_price(feed: &IfaPriceFeed): u256 {
+    let asset_id = bytes32::new(
+        x"6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d"
+    );
+
+    let (price_feed, exists) = price_feed::get_asset_info(feed, asset_id);
+
+    assert!(exists, 0); // asset must exist — no false flag on Sui
+
+    // Sui uses positive decimals
+    // decimal = 18 means divide by 10^18
+    // price_feed::price_decimal(price_feed) returns 18
+    // price_feed::price(price_feed) returns e.g. 1_000_124_000_000_000_000
+    // human-readable: 1_000_124_000_000_000_000 / 10^18 = 1.000124
+
+    price_feed::price(price_feed)
+}
+```
+
+### With Freshness Check
+
+```move
+module my_protocol::price_reader;
+
+use ifa_oracle::bytes32;
+use ifa_oracle::price_feed::{Self, IfaPriceFeed};
+use sui::clock::Clock;
+
+const E_PRICE_STALE: u64 = 1;
+const MAX_AGE_MS: u64 = 3_600_000; // 1 hour in milliseconds
+
+public fun get_fresh_usdt_price(feed: &IfaPriceFeed, clock: &Clock): u256 {
+    let asset_id = bytes32::new(
+        x"6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d"
+    );
+
+    let (price_feed, exists) = price_feed::get_asset_info(feed, asset_id);
+    assert!(exists, 0);
+
+    // Use the built-in is_fresh helper
+    // current_time comes from the Sui Clock object
+    let current_time = sui::clock::timestamp_ms(clock);
+    assert!(
+        price_feed::is_fresh(price_feed, current_time, MAX_AGE_MS),
+        E_PRICE_STALE
+    );
+
+    price_feed::price(price_feed)
+}
+```
+
+<Note>
+  Sui timestamps are in **milliseconds**. Set `MAX_AGE_MS` accordingly — 1 hour is `3_600_000`, not `3_600`. This is different from EVM where `block.timestamp` is in seconds.
+</Note>
+
+### Batch Read (Multiple Assets)
+
+```move
+module my_protocol::price_reader;
+
+use ifa_oracle::bytes32::{Self, Bytes32};
+use ifa_oracle::price_feed::{Self, IfaPriceFeed, PriceFeed};
+
+public fun get_multiple_prices(feed: &IfaPriceFeed): (vector<PriceFeed>, vector<bool>) {
+    let mut asset_ids = vector<Bytes32>[];
+
+    asset_ids.push_back(bytes32::new(
+        x"6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d" // USDT
+    ));
+    asset_ids.push_back(bytes32::new(
+        x"83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a" // CNGN
+    ));
+    asset_ids.push_back(bytes32::new(
+        x"12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8" // ZARP
+    ));
+
+    price_feed::get_assets_info(feed, asset_ids)
+}
+```
+
+### Derived Pair (Cross-Asset Price)
+
+```move
+module my_protocol::price_reader;
+
+use ifa_oracle::bytes32;
+use ifa_oracle::price_feed::{Self, IfaPriceFeed, DerivedPair};
+
+// Direction: 0 = Forward (asset0 / asset1), 1 = Backward (asset1 / asset0)
+const FORWARD: u8 = 0;
+
+/// Get CNGN priced in USDT terms
+public fun get_cngn_usdt_price(feed: &IfaPriceFeed): DerivedPair {
+    let cngn_id = bytes32::new(
+        x"83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a"
+    );
+    let usdt_id = bytes32::new(
+        x"6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d"
+    );
+
+    // Returns DerivedPair with decimal = 30 always
+    // derived_price is scaled by 10^30
+    price_feed::get_pair_by_id(feed, cngn_id, usdt_id, FORWARD)
+}
+```
+
+<Warning>
+  Derived pair functions **abort** if either underlying asset does not exist in the feed. Unlike EVM which returns `exists = false`, Sui will revert your entire transaction. Always verify both assets exist with `get_asset_info` before calling pair functions in production.
+</Warning>
+
+---
+
+## Reading a Price in TypeScript
+
+Use the Sui TypeScript SDK with `devInspectTransactionBlock` — no wallet or gas required for read-only queries.
+
+### Setup
+
+```bash
+npm install @mysten/sui
+```
+
+```typescript
+import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
+import { Transaction }               from "@mysten/sui/transactions";
+
+const client = new SuiClient({ url: getFullnodeUrl("testnet") });
+
+const IFA = {
+  packageId: "0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f",
+  feedId:    "0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a",
+} as const;
+```
+
+---
+
+### Single Asset Price
+
+```typescript
+async function getAssetPrice(symbol: string): Promise<{
+  price:          bigint;
+  decimal:        number;
+  lastUpdateTime: bigint;
+  exists:         boolean;
+}> {
+  const assetIds: Record<string, string> = {
+    "USDT/USD": "6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d",
+    "USDC/USD": "f989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d",
+    "CNGN/USD": "83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a",
+    "ZARP/USD": "12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8",
+    "BRZ/USD":  "bc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5",
+    "ETH/USD":  "8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0",
+  };
+
+  const hex = assetIds[symbol];
+  if (!hex) throw new Error(`Unsupported asset: ${symbol}`);
+
+  const assetIdBytes = Array.from(Buffer.from(hex, "hex"));
+
+  const tx = new Transaction();
+  tx.moveCall({
+    target:    `${IFA.packageId}::price_feed::get_asset_info`,
+    arguments: [
+      tx.object(IFA.feedId),
+      tx.pure.vector("u8", assetIdBytes),
+    ],
+  });
+
+  const result = await client.devInspectTransactionBlock({
+    transactionBlock: tx,
+    sender: "0x0000000000000000000000000000000000000000000000000000000000000000",
+  });
+
+  if (result.effects.status.status !== "success") {
+    throw new Error(`Query failed: ${result.effects.status.error}`);
+  }
+
+  // Parse return values from the devInspect result
+  const returnValues = result.results?.[0]?.returnValues;
+  if (!returnValues) throw new Error("No return values");
+
+  // returnValues[0] = PriceFeed struct, returnValues[1] = bool exists
+  // Deserialize based on BCS encoding
+  const exists = returnValues[1][0][0] === 1;
+
+  return { price: 0n, decimal: 0, lastUpdateTime: 0n, exists };
+  // Full BCS deserialization shown below
+}
+```
+
+### Full Example with BCS Deserialization
+
+```typescript
+import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
+import { Transaction }               from "@mysten/sui/transactions";
+import { bcs }                       from "@mysten/sui/bcs";
+
+const client = new SuiClient({ url: getFullnodeUrl("testnet") });
+
+const IFA = {
+  packageId: "0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f",
+  feedId:    "0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a",
+} as const;
+
+// BCS schema matching the Move PriceFeed struct
+const PriceFeedSchema = bcs.struct("PriceFeed", {
+  price:           bcs.u256(),
+  decimal:         bcs.u8(),
+  lastUpdateTime:  bcs.u64(),
+});
+
+async function getPrice(symbolHex: string) {
+  const assetIdBytes = Array.from(Buffer.from(symbolHex, "hex"));
+
+  const tx = new Transaction();
+  tx.moveCall({
+    target:    `${IFA.packageId}::price_feed::get_asset_info`,
+    arguments: [
+      tx.object(IFA.feedId),
+      tx.pure.vector("u8", assetIdBytes),
+    ],
+  });
+
+  const result = await client.devInspectTransactionBlock({
+    transactionBlock: tx,
+    sender: "0x0000000000000000000000000000000000000000000000000000000000000000",
+  });
+
+  if (result.effects.status.status !== "success") {
+    throw new Error(`Query failed: ${result.effects.status.error}`);
+  }
+
+  const returnValues = result.results?.[0]?.returnValues;
+  if (!returnValues || returnValues.length < 2) {
+    throw new Error("Unexpected return value structure");
+  }
+
+  // Deserialize PriceFeed struct
+  const priceFeedBytes = new Uint8Array(returnValues[0][0]);
+  const feed           = PriceFeedSchema.parse(priceFeedBytes);
+
+  // Deserialize exists bool
+  const exists = returnValues[1][0][0] === 1;
+
+  if (!exists) throw new Error("Asset not supported on this feed");
+
+  // Convert to human-readable
+  // Sui: decimal is positive — divide by 10^decimal
+  const divisor      = 10n ** BigInt(feed.decimal);
+  const humanPrice   = Number(feed.price) / Number(divisor);
+  const ageMs        = Date.now() - Number(feed.lastUpdateTime);
+  const ageSeconds   = Math.floor(ageMs / 1000);
+
+  return {
+    price:          humanPrice.toFixed(6),
+    rawPrice:       feed.price.toString(),
+    decimal:        feed.decimal,
+    lastUpdateTime: feed.lastUpdateTime.toString(),
+    ageSeconds,
+  };
+}
+
+// Example usage
+const USDT_HEX = "6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d";
+const result   = await getPrice(USDT_HEX);
+console.log(`USDT/USD: $${result.price} (${result.ageSeconds}s ago)`);
+// USDT/USD: $1.000124 (412s ago)
+```
+
+---
+
+## Reading via Sui CLI
+
+For quick checks without writing code:
+
+```bash
+# Set active environment to testnet
+sui client switch --env testnet
+
+# Read USDT/USD price
+sui client call \
+  --package 0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f \
+  --module price_feed \
+  --function get_asset_info \
+  --args \
+    0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a \
+    "[6,202,12,239,97,7,38,63,59,9,165,20,72,97,123,101,146,120,207,247,68,240,231,2,194,36,162,248,140,145,229,13]" \
+  --gas-budget 10000000
+```
+
+<Note>
+  The asset ID is passed as a JSON array of decimal byte values — not as a hex string. The array above is the decimal representation of the USDT/USD asset ID bytes.
+</Note>
+
+---
+
+## Converting Prices
+
+Sui uses **positive decimals** — the opposite sign convention from EVM.
+
+| Chain | Decimal value | Formula | Example |
+| --- | --- | --- | --- |
+| EVM | `-18` | `price / 10^(-decimal)` = `price / 10^18` | `1000124000000000000 / 10^18 = 1.000124` |
+| Sui | `18` | `price / 10^decimal` = `price / 10^18` | `1000124000000000000 / 10^18 = 1.000124` |
+
+The math is the same — only the sign of the `decimal` field differs.
+
+For derived pairs on Sui, the decimal is always `30`:
+
+```typescript
+// Derived pair result — decimal is always 30 on Sui
+const derivedPrice   = pair.derived_price; // e.g. 613000000000000000000000000n
+const humanPrice     = Number(derivedPrice) / 10 ** 30;
+// 613000000000000000000000000 / 10^30 = 0.000613
+// Meaning: 1 CNGN = 0.000613 USDT
+```
+
+---
+
+## Adding IFÁ Labs as a Move Dependency
+
+To use the oracle in your own Move package, add it to your `Move.toml`:
+
+```toml
+[package]
+name    = "my_protocol"
+edition = "2024"
+
+[dependencies]
+Sui        = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "framework/mainnet" }
+ifa_oracle = { git = "https://github.com/IFA-Labs/oracle_contract_sui.git", rev = "main" }
+
+[addresses]
+my_protocol = "0x0"
+```
+
+Then import in your Move source:
+
+```move
+use ifa_oracle::price_feed::{Self, IfaPriceFeed};
+use ifa_oracle::bytes32;
+```
+
+---
+
+## Getting Testnet Tokens
+
+You need testnet SUI to deploy contracts on Sui Testnet. Price reads via `devInspectTransactionBlock` are free and require no tokens.
+
+- **Official Sui Faucet:** [faucet.sui.io](https://faucet.sui.io)
+- **IFÁ Labs Faucet:** Claim testnet SUI and WAL directly — see [Testnet Faucet](/testnet-faucet)
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Sui Function Reference" icon="code" href="/sui-function-reference">
+    Complete reference for every public function in the IFÁ Labs Sui Move contracts.
+  </Card>
+
+  <Card title="Testnet Faucet" icon="faucet" href="/testnet-faucet">
+    Claim testnet SUI and WAL tokens for development.
+  </Card>
+</CardGroup>
+
+<CardGroup cols={2}>
+  <Card title="Supported Assets" icon="coins" href="/supported-assets">
+    All supported feeds with asset IDs in both EVM and Sui formats.
+  </Card>
+
+  <Card title="Contract Addresses" icon="file-contract" href="/contract-addresses">
+    All Sui object IDs and EVM contract addresses in one place.
+  </Card>
+</CardGroup>

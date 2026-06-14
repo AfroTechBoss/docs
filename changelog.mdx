@@ -13,36 +13,57 @@ Breaking changes are marked **\[BREAKING\]**. Security fixes are marked **\[SECU
 
 ### May 2026
 
-**May 2026**
+<AccordionGroup>
+  <Accordion title="[DEPLOYMENT] IFÁ Labs expands to Sui — three Move packages shipped on Sui Testnet">
+    **Oracle Contract (`ifa_oracle`)**
 
-**\[TOOLING\]** `@ifalabs/mcp-server` v1.0.0 published to npm.
+    - Package ID: `0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f`
+    - Feed ID: `0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a`
+    - Verifier ID: `0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5`
+    - All existing feeds available: USDT/USD, USDC/USD, CNGN/USD, ZARP/USD, BRZ/USD, ETH/USD
+    - Same asset IDs as EVM — passed as `vector<u8>` instead of `bytes32`
+    - Precision model: positive decimal (`u8`) instead of EVM negative decimal (`int8`)
+    - Derived pair decimal fixed at `30` — `derived_price` scaled by `10^30`
+    - Built-in `is_fresh` helper exposed as a public function
+    - GitHub: [IFA-Labs/oracle\_contract\_sui](https://github.com/IFA-Labs/oracle_contract_sui)
 
-- Install: `npm install -g @ifalabs/mcp-server`
-- Binary: `ifa-mcp`
-- 7 tools exposed: `get_asset_price`, `get_multiple_prices`, `get_derived_pair`, `get_supported_assets`, `get_asset_id`, `check_price_freshness`, `get_network_info`
-- Supported clients: Claude Desktop, Cursor, Windsurf, TRAE, Zed, Continue, LangChain, CrewAI, AutoGen
-- Transport: stdio (SSE planned)
-- Documentation: [MCP Server](/what-is-the-ifa-labs-mcp-server)
+    **Faucet (`ifa_labs::faucet`)**
+
+    - Package ID: `0xf77385d9dc49cf4774c0411a2b36d89d294ad5fe42ab1f52cc7d515044b1fa27`
+    - Registry ID: `0x5c0dc844ba7647af146e9edf7618bdbf47025dd0816e60db7ad9256cafda1054`
+    - Multi-token testnet faucet — SUI and WAL available for claiming
+    - Cooldown: 4 hours per token per recipient
+    - Claim amount: 0.5 SUI / 0.5 WAL per claim
+    - GitHub: [IFA-Labs/faucet\_sui](https://github.com/IFA-Labs/faucet_sui)
+  </Accordion>
+
+  <Accordion title="[TOOLING] @ifalabs/mcp-server v1.0.0 published to npm">
+    - Install: `npm install -g @ifalabs/mcp-server`
+    - Binary: `ifa-mcp`
+    - 7 tools exposed: `get_asset_price`, `get_multiple_prices`, `get_derived_pair`, `get_supported_assets`, `get_asset_id`, `check_price_freshness`, `get_network_info`
+    - Supported clients: Claude Desktop, Cursor, Windsurf, TRAE, Zed, Continue, LangChain, CrewAI, AutoGen
+    - Transport: stdio (SSE planned)
+    - Documentation: [MCP Server](/what-is-the-ifa-labs-mcp-server)
+  </Accordion>
+</AccordionGroup>
 
 ---
 
-## 2026
-
 ### January 2026
 
-**January 7, 2026**
+<AccordionGroup>
+  <Accordion title="[SECURITY] All A&D Forensics audit findings confirmed resolved — January 7, 2026">
+    - Finding 1 (Inefficient stale check) — resolved
+    - Finding 2 (Self-pairing allowed) — resolved
+    - Finding 3 (Zero-price validation missing) — resolved
+    - Finding 4 (Silent reverts) — resolved
+    - Finding 5 (Struct indexing) — resolved
+    - Finding 6 (Incorrect error reporting) — resolved
+    - Finding 7 (Unnecessary comments and inefficient logic) — resolved
 
-**\[SECURITY\]** All findings from the A&D Forensics security audit confirmed resolved.
-
-- Finding 1 (Inefficient stale check) — resolved
-- Finding 2 (Self-pairing allowed) — resolved
-- Finding 3 (Zero-price validation missing) — resolved
-- Finding 4 (Silent reverts) — resolved
-- Finding 5 (Struct indexing) — resolved
-- Finding 6 (Incorrect error reporting) — resolved
-- Finding 7 (Unnecessary comments and inefficient logic) — resolved
-
-Full audit summary: [AdForensics Audit Summary](/ad-forensics-audit-summary)
+    Full audit summary: [AdForensics Audit Summary](/adforensics-audit-summary)
+  </Accordion>
+</AccordionGroup>
 
 ---
 
@@ -50,58 +71,62 @@ Full audit summary: [AdForensics Audit Summary](/ad-forensics-audit-summary)
 
 ### July 2025
 
-**July 31, 2025**
-
-**\[SECURITY\]** A&D Forensics security audit of oracle contracts completed.
-
-- Audit scope: full oracle contract codebase at commit `17f7ffc31a9818f35977ad042986cb72820d513b`
-- Methodology: manual code review, Mythril static analysis, functional testing
-- Result: no critical or high severity findings — 5 low, 2 informational
-- Status at delivery: all findings identified, remediation in progress
+<AccordionGroup>
+  <Accordion title="[SECURITY] A&D Forensics security audit of oracle contracts completed — July 31, 2025">
+    - Audit scope: full oracle contract codebase at commit `17f7ffc31a9818f35977ad042986cb72820d513b`
+    - Methodology: manual code review, Mythril static analysis, functional testing
+    - Result: no critical or high severity findings — 5 low, 2 informational
+    - Status at delivery: all findings identified, remediation in progress
+  </Accordion>
+</AccordionGroup>
 
 ---
 
 ### June 2025
 
-**June 25, 2025**
+<AccordionGroup>
+  <Accordion title="[ASSET] ZARP/USD feed added — South African rand stablecoin — June 25, 2025">
+    - Asset ID: `0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8`
+    - Deviation threshold: 0.3%
+    - Heartbeat: 2 hours
+    - Available on: Base Mainnet, Base Sepolia, AssetChain Testnet
+  </Accordion>
 
-**\[ASSET\]** ZARP/USD feed added — South African rand stablecoin.
-
-- Asset ID: `0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8`
-- Deviation threshold: 0.3%
-- Heartbeat: 2 hours
-- Available on: Base Mainnet, Base Sepolia, AssetChain Testnet
-
-**June 24, 2025**
-
-IFÁ Labs demoed at Base ecosystem event. Deck and recording available via [@ifalabs](https://x.com/ifalabs).
+  <Accordion title="IFÁ Labs demoed at Base ecosystem event — June 24, 2025">
+    Deck and recording available via [@ifalabs](https://x.com/ifalabs).
+  </Accordion>
+</AccordionGroup>
 
 ---
 
 ### March 2025
 
-**March 2025**
-
-**\[DEPLOYMENT\]** IFÁ Labs joined [@ifalabs](https://x.com/ifalabs) on X.
+<AccordionGroup>
+  <Accordion title="[DEPLOYMENT] IFÁ Labs joined @ifalabs on X">
+    Follow [@ifalabs](https://x.com/ifalabs) for deployment announcements, new asset feeds, and ecosystem updates.
+  </Accordion>
+</AccordionGroup>
 
 ---
 
 ### Initial Deployments
 
-**\[DEPLOYMENT\]** Oracle contracts deployed to Base Mainnet.
+<AccordionGroup>
+  <Accordion title="[DEPLOYMENT] Oracle contracts deployed to Base Mainnet">
+    - Contract: `0xA9F17344689C2c2328F94464998db1d3e35B80dC`
+    - Initial feeds: USDT/USD, USDC/USD, CNGN/USD, BRZ/USD, ETH/USD
+  </Accordion>
 
-- Contract: `0xA9F17344689C2c2328F94464998db1d3e35B80dC`
-- Initial feeds: USDT/USD, USDC/USD, CNGN/USD, BRZ/USD, ETH/USD
+  <Accordion title="[DEPLOYMENT] Oracle contracts deployed to Base Sepolia testnet">
+    - Contract: `0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b`
+    - Identical feeds and interface to mainnet
+  </Accordion>
 
-**\[DEPLOYMENT\]** Oracle contracts deployed to Base Sepolia testnet.
-
-- Contract: `0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b`
-- Identical feeds and interface to mainnet
-
-**\[DEPLOYMENT\]** Oracle contracts deployed to AssetChain Testnet.
-
-- Contract: `0xBAc31e568883774A632275F9c8E7A5Bd117000F7`
-- RWA-focused ecosystem integration
+  <Accordion title="[DEPLOYMENT] Oracle contracts deployed to AssetChain Testnet">
+    - Contract: `0xBAc31e568883774A632275F9c8E7A5Bd117000F7`
+    - RWA-focused ecosystem integration
+  </Accordion>
+</AccordionGroup>
 
 ---
 
@@ -111,6 +136,8 @@ The following changes are planned and will be documented here when released:
 
 | Change | Type | Target |
 | --- | --- | --- |
+| Sui Mainnet deployment | \[DEPLOYMENT\] | TBD |
+| Sui swap contract | \[DEPLOYMENT\] | TBD |
 | AssetChain Mainnet deployment | \[DEPLOYMENT\] | TBD |
 | Solana native program | \[DEPLOYMENT\] | TBD |
 | Optimism deployment | \[DEPLOYMENT\] | TBD |

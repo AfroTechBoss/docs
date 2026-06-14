@@ -1,21 +1,30 @@
 ---
 title: "Supported Chains & Roadmap"
-description: "Where IFÁ Labs oracle feeds are live today, which EVM chains are coming next, and how multi-chain expansion is prioritized and rolled out safely."
+description: "Where IFÁ Labs oracle feeds are live today, which chains are coming next, and how multi-chain expansion is prioritized and rolled out safely."
 ---
 
-IFÁ Labs is designed as a multi-chain oracle network from day one — not a single-chain product with ports bolted on later. The architecture is built to deploy consistently across EVM-compatible chains and non-EVM ecosystems like Solana, with identical asset IDs, aggregation logic, and security guarantees on every network.
+IFÁ Labs is designed as a multi-chain oracle network from day one — not a single-chain product with ports bolted on later. The architecture is built to deploy consistently across EVM-compatible chains and non-EVM ecosystems like Sui and Solana, with identical asset IDs, aggregation logic, and security guarantees on every network.
+
+---
 
 ## Live Deployments
 
-| Network | Type | Contract Address | Explorer |
+| Network | Type | Address / Package ID | Explorer |
 | --- | --- | --- | --- |
 | **Base Mainnet** | EVM L2 — Production | `0xA9F17344689C2c2328F94464998db1d3e35B80dC` | [View on Basescan](https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC) |
 | **Base Sepolia** | EVM L2 — Testnet | `0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b` | [View on Basescan Sepolia](https://sepolia.basescan.org/address/0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b) |
 | **AssetChain Testnet** | EVM — Testnet | `0xBAc31e568883774A632275F9c8E7A5Bd117000F7` | [View on AssetChain Explorer](https://scan-testnet.assetchain.org/address/0xBAc31e568883774A632275F9c8E7A5Bd117000F7) |
+| **Sui Testnet** | Sui Move — Testnet | `0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f` | [View on Suiscan](https://suiscan.xyz/testnet/object/0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f) |
 
 <Info>
-  Base Mainnet is the primary production deployment. If you're building for production, start here. Use Base Sepolia for all testing and development work before going live.
+  Base Mainnet is the primary production deployment. If you're building for production, start here. Use Base Sepolia for all EVM testing and development before going live.
 </Info>
+
+<Note>
+  The Sui Testnet entry shows the **Package ID**. On Sui, you interact with the **Feed Object** (`0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a`) when reading prices — not the package directly. See the [Sui Integration Guide](/sui-read-latest-price) for details.
+</Note>
+
+---
 
 ## Why Base First?
 
@@ -27,17 +36,39 @@ Base was selected as the primary deployment chain for three reasons:
 
 **Ecosystem alignment.** Base has strong and growing DeFi activity, a developer-friendly environment, and direct alignment with the stablecoin and payments use cases IFÁ Labs serves — including native USDC support via Circle.
 
+---
+
 ## AssetChain Integration
 
 AssetChain is a blockchain infrastructure focused on real-world asset (RWA) tokenization. IFÁ Labs' integration here is deliberate — RWA protocols require reliable stablecoin pricing for collateral valuation, settlement, and on-chain accounting. AssetChain Mainnet deployment is targeted for when the ecosystem reaches full production readiness.
+
+---
+
+## Sui Integration
+
+Sui is a high-performance, object-centric Layer 1 blockchain with a native Move programming language. IFÁ Labs on Sui is implemented as a native Move package — not an EVM port — using Sui's shared object model for price storage and access.
+
+Key differences from EVM deployments:
+
+- **Shared objects instead of contract calls.** Price feeds are stored in a shared `IfaPriceFeed` object. Consumers pass the object by reference in transactions rather than calling a contract address.
+- **Positive decimal convention.** Sui Move uses unsigned integers — the `decimal` field is a positive `u8` (e.g. `18`) rather than a negative `int8` (e.g. `-18`).
+- **Derived pair decimal is always 30.** On Sui, all derived pair results use a fixed `decimal` of `30`, with `derived_price` scaled by `10^30`.
+- **Built-in freshness helper.** The Sui contract exposes `price_feed::is_fresh(price_feed, current_time, max_age)` directly — developers do not need to implement this check themselves.
+- **Asset IDs as `vector<u8>`.** The same 32-byte asset ID values are used across all networks, but on Sui they are passed as `vector<u8>` rather than `bytes32` hex strings.
+
+Sui Mainnet deployment is planned once testnet integration is validated by the ecosystem.
+
+---
 
 ## Roadmap
 
 | Milestone | Target | Details |
 | --- | --- | --- |
+| **Sui Mainnet** | TBD | Full production deployment following testnet validation |
 | **AssetChain Mainnet** | TBD | Full production deployment for RWA-focused protocols |
-| **Solana** | TBD | Native Solana program with dedicated interface — different from EVM contracts |
+| **Solana** | TBD | Native Solana program with dedicated interface — different from EVM and Sui contracts |
 | **Additional EVM L2s** | TBD | Optimism, Arbitrum, Polygon zkEVM, and others based on ecosystem demand |
+| **Sui Swap Contract** | TBD | Heterogeneous liquidity pool on Sui powered by IFÁ Labs price feeds |
 | **Cross-Chain Messaging** | H2 2026 | Unified price propagation via LayerZero or Wormhole for instant cross-chain synchronization |
 | **Global View Contracts** | H2 2026 | Single-query endpoints returning consistent prices regardless of chain |
 
@@ -45,15 +76,19 @@ AssetChain is a blockchain infrastructure focused on real-world asset (RWA) toke
   Timeline targets marked TBD are actively being scoped. Follow [@ifalabs](https://x.com/ifalabs) on X or join the [Telegram](https://t.me/ifalabs) for deployment announcements as they happen.
 </Note>
 
+---
+
 ## Cross-Chain Consistency Guarantee
 
 When IFÁ Labs deploys to a new chain, it doesn't spin up a separate product — it extends the same network. Specifically:
 
-- **Identical asset IDs** across every chain. The `bytes32` identifier for USDT/USD on Base is the same on AssetChain and will be the same on Solana. No remapping, no migration.
+- **Identical asset IDs across every chain.** The 32-byte value for USDT/USD is the same on Base, AssetChain, and Sui. On EVM it is used as a `bytes32` hex string. On Sui it is passed as a `vector<u8>`. The underlying bytes are identical — no remapping, no migration.
 - **Shared data sources and aggregation rules.** The same multi-source feeds, outlier detection, and consensus logic run on every deployment. Prices on different chains reflect the same underlying market reality.
 - **Synchronized update triggers.** Deviation and time-based thresholds are calibrated consistently, so price data across chains stays tightly aligned — typically within 0.1% variance under normal conditions.
 
 This matters for cross-chain protocols. If your application spans multiple chains and needs consistent stablecoin pricing across all of them, IFÁ Labs gives you that guarantee by design — not as an afterthought.
+
+---
 
 ## Requesting Chain Support
 
@@ -65,11 +100,23 @@ Building on a chain that isn't listed? IFÁ Labs prioritizes deployments based o
 
 Reach out via [support@ifalabs.com](mailto:support@ifalabs.com) or open a request on [GitHub](https://github.com/IFA-Labs/oracle_contract/issues) with details about your chain and use case.
 
+---
+
 ## Next Steps
 
 <CardGroup cols={2}>
-  <Card title="Quickstart" icon="bolt" href="/prerequisites">
-    Get your first on-chain price from a live deployment in minutes.
+  <Card title="Quickstart (EVM)" icon="bolt" href="/prerequisites">
+    Get your first on-chain price from Base Mainnet in minutes.
+  </Card>
+
+  <Card title="Quickstart (Sui)" icon="bolt" href="/sui-read-latest-price">
+    Read prices from the IFÁ Labs oracle using Sui Move or the TypeScript SDK.
+  </Card>
+</CardGroup>
+
+<CardGroup cols={2}>
+  <Card title="Network Information" icon="network-wired" href="/network-information">
+    Full network reference including RPC endpoints, object IDs, and faucet links.
   </Card>
 
   <Card title="Cross-Chain Price Consistency" icon="link" href="/cross-chain-price-consistency">

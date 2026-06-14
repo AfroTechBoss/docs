@@ -1,0 +1,584 @@
+---
+title: "Function Reference (Sui)"
+description: "Complete reference for every public function in the IFÁ Labs Sui Move oracle contracts — signatures, parameters, return types, and usage notes."
+---
+
+This page is the complete reference for every public function exposed by the IFÁ Labs Sui Move oracle package. All functions are read-only — they do not modify on-chain state and do not require gas when called via `devInspectTransactionBlock`.
+
+For the EVM function reference, see [Function Reference](/function-reference).
+
+---
+
+## Package Structure
+
+The IFÁ Labs Sui oracle package (`ifa_oracle`) contains three modules:
+
+| Module | Description |
+| --- | --- |
+| `ifa_oracle::price_feed` | Core oracle — stores and exposes price data |
+| `ifa_oracle::verifier` | Relayer authorization — controls who can submit prices |
+| `ifa_oracle::bytes32` | Utility type — wraps `vector<u8>` as a 32-byte identifier |
+
+Consumers only need `price_feed` and `bytes32`. The `verifier` module is used by the IFÁ Labs relayer infrastructure — not by protocol integrators.
+
+---
+
+## Data Types
+
+### `PriceFeed`
+
+The primary struct returned by all single-asset price queries.
+
+```move
+public struct PriceFeed has copy, drop, store {
+    price:            u256,  // Scaled price value — always positive
+    decimal:          u8,    // Positive scaling exponent e.g. 18
+    last_update_time: u64,   // Unix timestamp in milliseconds
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `price` | `u256` | Raw scaled price. Divide by `10^decimal` for the human-readable value. |
+| `decimal` | `u8` | Positive scaling exponent. All current feeds return `18`. |
+| `last_update_time` | `u64` | Unix timestamp in **milliseconds** of the last update. Note: milliseconds, not seconds. |
+
+<Warning>
+  `last_update_time` is in **milliseconds** on Sui. When comparing against `clock::timestamp_ms(clock)`, use millisecond thresholds. `3_600_000` is 1 hour — not `3_600`.
+</Warning>
+
+---
+
+### `DerivedPair`
+
+The return type for all cross-asset pair calculations.
+
+```move
+public struct DerivedPair has copy, drop, store {
+    decimal:         u8,   // Always 30 for derived pairs
+    last_update_time: u64, // Older of the two underlying feed timestamps (milliseconds)
+    derived_price:   u256, // Cross-asset price scaled by 10^30
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `decimal` | `u8` | Always `30` for all derived pairs — fixed, not per-asset. |
+| `last_update_time` | `u64` | The **older** of the two underlying feed timestamps in milliseconds. |
+| `derived_price` | `u256` | Cross-asset price scaled by `10^30`. Divide by `10^30` for human-readable value. |
+
+<Info>
+  The derived pair decimal is always `30` regardless of which assets are involved. This differs from EVM where the decimal is per-asset. Always divide `derived_price` by `10^30`.
+</Info>
+
+---
+
+### `Bytes32`
+
+A wrapper type for 32-byte asset identifiers.
+
+```move
+public struct Bytes32 has copy, drop, store {
+    value: vector<u8>,  // Exactly 32 bytes
+}
+```
+
+Always construct using `bytes32::new()` — direct struct construction is not permitted outside the module.
+
+---
+
+### Direction Constants
+
+Used as the `direction` parameter in derived pair functions:
+
+```move
+const PAIR_DIRECTION_FORWARD:  u8 = 0;  // asset0 / asset1
+const PAIR_DIRECTION_BACKWARD: u8 = 1;  // asset1 / asset0
+```
+
+---
+
+## `bytes32` Module
+
+### `bytes32::new`
+
+Constructs a `Bytes32` from a 32-byte `vector<u8>`. Aborts if the input is not exactly 32 bytes.
+
+```move
+public fun new(value: vector<u8>): Bytes32
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `value` | `vector<u8>` | Exactly 32 bytes. Use hex literal syntax: `x"6ca0cef6..."` |
+
+**Aborts:** `E_INVALID_BYTES32_LENGTH` if `value.length() != 32`
+
+**Example:**
+
+```move
+use ifa_oracle::bytes32;
+
+let usdt_id = bytes32::new(
+    x"6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d"
+);
+```
+
+---
+
+### `bytes32::inner`
+
+Returns a reference to the inner `vector<u8>`.
+
+```move
+public fun inner(b: &Bytes32): &vector<u8>
+```
+
+---
+
+### `bytes32::into_inner`
+
+Consumes the `Bytes32` and returns the inner `vector<u8>`.
+
+```move
+public fun into_inner(b: Bytes32): vector<u8>
+```
+
+---
+
+## `price_feed` Module — Getter Functions
+
+These functions extract fields from `PriceFeed` and `DerivedPair` structs.
+
+### `price_feed::price`
+
+Returns the raw scaled price from a `PriceFeed`.
+
+```move
+public fun price(price_feed: PriceFeed): u256
+```
+
+**Example:**
+
+```move
+let (feed, exists) = price_feed::get_asset_info(oracle_feed, asset_id);
+assert!(exists, 0);
+let raw_price = price_feed::price(feed);
+// Divide by 10^decimal for human-readable value
+```
+
+---
+
+### `price_feed::price_decimal`
+
+Returns the scaling exponent from a `PriceFeed`.
+
+```move
+public fun price_decimal(price_feed: PriceFeed): u8
+```
+
+Always returns `18` for all current IFÁ Labs feeds. Read dynamically — do not hardcode `18`.
+
+---
+
+### `price_feed::last_update_time`
+
+Returns the last update timestamp in milliseconds from a `PriceFeed`.
+
+```move
+public fun last_update_time(price_feed: PriceFeed): u64
+```
+
+---
+
+### `price_feed::derived_pair_decimal`
+
+Returns the decimal from a `DerivedPair`. Always `30`.
+
+```move
+public fun derived_pair_decimal(pair: DerivedPair): u8
+```
+
+---
+
+### `price_feed::derived_pair_last_update_time`
+
+Returns the last update timestamp from a `DerivedPair` in milliseconds. Reflects the older of the two underlying feed timestamps.
+
+```move
+public fun derived_pair_last_update_time(pair: DerivedPair): u64
+```
+
+---
+
+### `price_feed::derived_price`
+
+Returns the raw derived price from a `DerivedPair`. Always scaled by `10^30`.
+
+```move
+public fun derived_price(pair: DerivedPair): u256
+```
+
+---
+
+### `price_feed::is_fresh`
+
+Checks whether a price feed is within a given age threshold. Returns `true` if fresh, `false` if stale.
+
+```move
+public fun is_fresh(price_feed: PriceFeed, current_time: u64, max_age: u64): bool
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `price_feed` | `PriceFeed` | The price feed to check |
+| `current_time` | `u64` | Current timestamp in milliseconds — use `clock::timestamp_ms(clock)` |
+| `max_age` | `u64` | Maximum acceptable age in milliseconds — e.g. `3_600_000` for 1 hour |
+
+**Example:**
+
+```move
+use ifa_oracle::price_feed;
+use sui::clock::Clock;
+
+public fun get_fresh_price(
+    feed:    &price_feed::IfaPriceFeed,
+    clock:   &Clock,
+    asset_id: bytes32::Bytes32,
+): u256 {
+    let (price_feed, exists) = price_feed::get_asset_info(feed, asset_id);
+    assert!(exists, 0);
+
+    let current_time = sui::clock::timestamp_ms(clock);
+    let max_age_ms   = 3_600_000; // 1 hour
+
+    assert!(price_feed::is_fresh(price_feed, current_time, max_age_ms), 1);
+
+    price_feed::price(price_feed)
+}
+```
+
+---
+
+## `price_feed` Module — Query Functions
+
+### `price_feed::get_asset_info`
+
+Fetches the current price feed for a single asset.
+
+```move
+public fun get_asset_info(
+    feed:        &IfaPriceFeed,
+    asset_index: Bytes32,
+): (PriceFeed, bool)
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `feed` | `&IfaPriceFeed` | Shared feed object — pass by immutable reference |
+| `asset_index` | `Bytes32` | Asset ID constructed via `bytes32::new()` |
+
+**Returns:**
+
+| Value | Type | Description |
+| --- | --- | --- |
+| `PriceFeed` | `PriceFeed` | Price, decimal, and last update time. Zero-valued if `exists = false`. |
+| `exists` | `bool` | `true` if the asset has a price feed. `false` if not supported. |
+
+**Behaviour:**
+
+- Does **not** abort on unsupported assets — returns `(empty_price_feed, false)`.
+- Safe to call with any `Bytes32` value.
+- Always check `exists` before using the returned `PriceFeed`.
+
+**Example:**
+
+```move
+use ifa_oracle::price_feed::{Self, IfaPriceFeed};
+use ifa_oracle::bytes32;
+
+public fun read_usdt_price(feed: &IfaPriceFeed): u256 {
+    let asset_id = bytes32::new(
+        x"6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d"
+    );
+
+    let (price_feed, exists) = price_feed::get_asset_info(feed, asset_id);
+    assert!(exists, 0);
+
+    price_feed::price(price_feed)
+}
+```
+
+---
+
+### `price_feed::get_assets_info`
+
+Batch version of `get_asset_info`. Fetches price feeds for multiple assets in a single call.
+
+```move
+public fun get_assets_info(
+    feed:         &IfaPriceFeed,
+    asset_indexes: vector<Bytes32>,
+): (vector<PriceFeed>, vector<bool>)
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `feed` | `&IfaPriceFeed` | Shared feed object |
+| `asset_indexes` | `vector<Bytes32>` | Array of asset IDs to query |
+
+**Returns:**
+
+| Value | Type | Description |
+| --- | --- | --- |
+| `vector<PriceFeed>` | `vector<PriceFeed>` | Array of price feeds — same order as input |
+| `vector<bool>` | `vector<bool>` | Array of existence flags — same order as input |
+
+**Behaviour:**
+
+- Results are returned in the same order as the input vector.
+- Each `exists[i]` corresponds to `prices[i]`.
+- Does not abort on unsupported assets — returns `false` in the exists vector for missing assets.
+
+**Example:**
+
+```move
+use ifa_oracle::price_feed::{Self, IfaPriceFeed};
+use ifa_oracle::bytes32::{Self, Bytes32};
+
+public fun read_multiple_prices(feed: &IfaPriceFeed): vector<u256> {
+    let mut asset_ids = vector<Bytes32>[];
+
+    asset_ids.push_back(bytes32::new(
+        x"6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d" // USDT
+    ));
+    asset_ids.push_back(bytes32::new(
+        x"83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a" // CNGN
+    ));
+    asset_ids.push_back(bytes32::new(
+        x"12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8" // ZARP
+    ));
+
+    let (price_feeds, exists) = price_feed::get_assets_info(feed, asset_ids);
+
+    let mut prices = vector<u256>[];
+    let mut i      = 0;
+
+    while (i < price_feeds.length()) {
+        assert!(*exists.borrow(i), 0); // abort if any asset missing
+        prices.push_back(price_feed::price(*price_feeds.borrow(i)));
+        i = i + 1;
+    };
+
+    prices
+}
+```
+
+---
+
+### `price_feed::get_pair_by_id`
+
+Computes a derived cross-asset price for a single pair.
+
+```move
+public fun get_pair_by_id(
+    feed:          &IfaPriceFeed,
+    asset_index_0: Bytes32,
+    asset_index_1: Bytes32,
+    direction:     u8,
+): DerivedPair
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `feed` | `&IfaPriceFeed` | Shared feed object |
+| `asset_index_0` | `Bytes32` | First asset ID |
+| `asset_index_1` | `Bytes32` | Second asset ID |
+| `direction` | `u8` | `0` = Forward (asset0/asset1), `1` = Backward (asset1/asset0) |
+
+**Returns:** `DerivedPair` with `decimal = 30` and `derived_price` scaled by `10^30`.
+
+**Aborts:**
+
+- `E_INVALID_ASSET_PAIRING` — if `asset_index_0 == asset_index_1` (self-pair)
+- `E_INVALID_DIRECTION` — if `direction` is not `0` or `1`
+- `E_INVALID_ASSET_INDEX` — if either asset does not exist in the feed
+
+<Warning>
+  This function **aborts** if either asset is missing — it does not return a false flag. Always verify both assets exist with `get_asset_info` before calling this function in production.
+</Warning>
+
+**Example:**
+
+```move
+// CNGN priced in USDT terms (forward: asset0 / asset1)
+let pair = price_feed::get_pair_by_id(feed, cngn_id, usdt_id, 0);
+let cngn_in_usdt = price_feed::derived_price(pair); // scaled by 10^30
+```
+
+---
+
+### `price_feed::get_pairs_by_id_forward`
+
+Batch derived pair calculation — all pairs in the forward direction.
+
+```move
+public fun get_pairs_by_id_forward(
+    feed:           &IfaPriceFeed,
+    asset_indexes_0: vector<Bytes32>,
+    asset_indexes_1: vector<Bytes32>,
+): vector<DerivedPair>
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `feed` | `&IfaPriceFeed` | Shared feed object |
+| `asset_indexes_0` | `vector<Bytes32>` | Array of first assets (numerator) |
+| `asset_indexes_1` | `vector<Bytes32>` | Array of second assets (denominator) |
+
+**Returns:** `vector<DerivedPair>` — same order as inputs. All pairs computed in forward direction.
+
+**Aborts:** `E_INVALID_ASSET_INDEX_LENGTH` if input arrays have different lengths.
+
+**Example:**
+
+```move
+let mut assets0 = vector<Bytes32>[];
+let mut assets1 = vector<Bytes32>[];
+
+assets0.push_back(cngn_id); assets1.push_back(usdt_id); // CNGN/USDT
+assets0.push_back(zarp_id); assets1.push_back(usdc_id); // ZARP/USDC
+
+let pairs = price_feed::get_pairs_by_id_forward(feed, assets0, assets1);
+```
+
+---
+
+### `price_feed::get_pairs_by_id_backward`
+
+Batch derived pair calculation — all pairs in the backward direction.
+
+```move
+public fun get_pairs_by_id_backward(
+    feed:            &IfaPriceFeed,
+    asset_indexes_0: vector<Bytes32>,
+    asset_indexes_1: vector<Bytes32>,
+): vector<DerivedPair>
+```
+
+Identical to `get_pairs_by_id_forward` except all pairs are computed in the backward direction (asset1 / asset0).
+
+**Aborts:** `E_INVALID_ASSET_INDEX_LENGTH` if input arrays have different lengths.
+
+---
+
+### `price_feed::get_pairs_by_id`
+
+Batch derived pair calculation with per-pair direction control.
+
+```move
+public fun get_pairs_by_id(
+    feed:            &IfaPriceFeed,
+    asset_indexes_0: vector<Bytes32>,
+    asset_indexes_1: vector<Bytes32>,
+    directions:      vector<u8>,
+): vector<DerivedPair>
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `feed` | `&IfaPriceFeed` | Shared feed object |
+| `asset_indexes_0` | `vector<Bytes32>` | Array of first assets |
+| `asset_indexes_1` | `vector<Bytes32>` | Array of second assets |
+| `directions` | `vector<u8>` | Per-pair direction — must be same length as asset arrays |
+
+**Aborts:** `E_INVALID_ASSET_OR_DIRECTION_INDEX_LENGTH` if any of the three arrays have different lengths.
+
+**Example:**
+
+```move
+let mut assets0    = vector<Bytes32>[];
+let mut assets1    = vector<Bytes32>[];
+let mut directions = vector<u8>[];
+
+assets0.push_back(cngn_id); assets1.push_back(usdt_id); directions.push_back(0); // CNGN/USDT forward
+assets0.push_back(usdt_id); assets1.push_back(cngn_id); directions.push_back(1); // CNGN/USDT backward
+
+let pairs = price_feed::get_pairs_by_id(feed, assets0, assets1, directions);
+```
+
+---
+
+## Error Codes
+
+| Constant | Value | When It Fires |
+| --- | --- | --- |
+| `E_INVALID_ASSET_INDEX` | `0` | `get_pair_by_id` — one or both assets do not exist in the feed |
+| `E_INVALID_ASSET_INDEX_LENGTH` | `1` | Batch functions — input arrays have different lengths |
+| `E_INVALID_ASSET_OR_DIRECTION_INDEX_LENGTH` | `2` | `get_pairs_by_id` — arrays and directions vector have different lengths |
+| `E_INVALID_ASSET_PAIRING` | `3` | `get_pair_by_id` — same asset passed for both parameters (self-pair) |
+| `E_INVALID_SCALE_PRICE` | `4` | Internal — price decimal exceeds `MAX_DECIMAL` of 30 |
+| `E_SCALE_PRICE_OVERFLOW` | `5` | Internal — derived price calculation overflows |
+| `E_INVALID_DIRECTION` | `6` | `get_pair_by_id` — direction is not `0` or `1` |
+| `E_INVALID_BYTES32_LENGTH` | `0` | `bytes32::new()` — input vector is not exactly 32 bytes |
+
+---
+
+## Function Quick Reference
+
+| Function | Module | Returns | Aborts on Error |
+| --- | --- | --- | --- |
+| `bytes32::new(value)` | `bytes32` | `Bytes32` | Yes — wrong length |
+| `bytes32::inner(b)` | `bytes32` | `&vector<u8>` | No |
+| `bytes32::into_inner(b)` | `bytes32` | `vector<u8>` | No |
+| `price_feed::price(feed)` | `price_feed` | `u256` | No |
+| `price_feed::price_decimal(feed)` | `price_feed` | `u8` | No |
+| `price_feed::last_update_time(feed)` | `price_feed` | `u64` | No |
+| `price_feed::derived_pair_decimal(pair)` | `price_feed` | `u8` | No |
+| `price_feed::derived_pair_last_update_time(pair)` | `price_feed` | `u64` | No |
+| `price_feed::derived_price(pair)` | `price_feed` | `u256` | No |
+| `price_feed::is_fresh(feed, time, max_age)` | `price_feed` | `bool` | No |
+| `price_feed::get_asset_info(feed, id)` | `price_feed` | `(PriceFeed, bool)` | No |
+| `price_feed::get_assets_info(feed, ids)` | `price_feed` | `(vector<PriceFeed>, vector<bool>)` | No |
+| `price_feed::get_pair_by_id(feed, id0, id1, dir)` | `price_feed` | `DerivedPair` | Yes — missing asset or self-pair |
+| `price_feed::get_pairs_by_id_forward(feed, ids0, ids1)` | `price_feed` | `vector<DerivedPair>` | Yes — length mismatch |
+| `price_feed::get_pairs_by_id_backward(feed, ids0, ids1)` | `price_feed` | `vector<DerivedPair>` | Yes — length mismatch |
+| `price_feed::get_pairs_by_id(feed, ids0, ids1, dirs)` | `price_feed` | `vector<DerivedPair>` | Yes — length mismatch |
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Read Latest Price (Sui)" icon="circle-dot" href="/sui-read-latest-price">
+    Full integration examples using Move and the Sui TypeScript SDK.
+  </Card>
+
+  <Card title="Testnet Faucet" icon="faucet" href="/testnet-faucet">
+    Claim testnet SUI and WAL tokens for development.
+  </Card>
+</CardGroup>
+
+<CardGroup cols={2}>
+  <Card title="Function Reference (EVM)" icon="code" href="/function-reference">
+    The equivalent reference for EVM contract functions.
+  </Card>
+
+  <Card title="Contract Addresses" icon="file-contract" href="/contract-addresses">
+    All Sui object IDs and EVM contract addresses.
+  </Card>
+</CardGroup>

@@ -11,7 +11,7 @@ While most oracle networks are built around volatile assets like BTC and ETH, IF
 
 IFÁ Labs collects price data from multiple independent sources — centralized exchanges, decentralized pools, and regional forex providers — aggregates it using manipulation-resistant consensus logic, and pushes the verified result on-chain via decentralized relayers.
 
-The result is stored in audited, EVM-compatible smart contracts. Any protocol can read it with a single view call. No API keys. No off-chain trust. No middleware.
+The result is stored in audited smart contracts across EVM-compatible chains and as native Sui Move shared objects. Any protocol can read it with a single view call or object query. No API keys. No off-chain trust. No middleware.
 
 ## Who It's Built For
 
@@ -19,7 +19,7 @@ The result is stored in audited, EVM-compatible smart contracts. Any protocol ca
 - **Lending and borrowing platforms** running liquidation logic against stablecoin pairs
 - **Payment and remittance infrastructure** settling cross-border transactions at verifiable rates
 - **Stablecoin issuers and RWA platforms** that need on-chain proof of peg
-- **Any developer** building price-sensitive applications on Base, AssetChain, or upcoming supported chains
+- **Any developer** building price-sensitive applications on Base, AssetChain, Sui, or upcoming supported chains
 
 ## Supported Assets
 
@@ -34,26 +34,41 @@ IFÁ Labs currently provides price feeds for:
 | BRZ/USD | Brazilian Real stablecoin |
 | ETH/USD | Ethereum — included for derived pair calculations |
 
-New assets are added based on ecosystem demand. [Request a feed →](/get-help)
+All feeds are available across every supported network. New assets are added based on ecosystem demand. [Request a feed →](/get-help)
 
 ## Currently Live On
 
-| Network | Status |
-| --- | --- |
-| Base Mainnet | Live |
-| Base Sepolia | Testnet |
-| AssetChain Testnet | Live |
+| Network | Type | Status |
+| --- | --- | --- |
+| Base Mainnet | EVM | Live |
+| Base Sepolia | EVM | Testnet |
+| AssetChain Testnet | EVM | Testnet |
+| Sui Testnet | Sui Move | Testnet |
 
 Solana and additional EVM L2s are on the roadmap.
+
+<Info>
+  IFÁ Labs on Sui uses native Move shared objects rather than EVM smart contracts. The oracle interface, asset IDs, and supported feeds are equivalent — but the integration pattern is different. See the [Sui Integration Guide](/sui-read-latest-price) for Move-specific usage.
+</Info>
 
 ## Ready to Integrate?
 
 <CardGroup cols={2}>
-  <Card title="Quickstart" icon="bolt" href="/prerequisites">
-    Fetch your first on-chain price in minutes.
+  <Card title="Quickstart (EVM)" icon="bolt" href="/prerequisites">
+    Fetch your first on-chain price from Base Mainnet in minutes.
   </Card>
 
+  <Card title="Quickstart (Sui)" icon="bolt" href="/sui-read-latest-price">
+    Read prices from the IFÁ Labs oracle using Sui Move or the TypeScript SDK.
+  </Card>
+</CardGroup>
+
+<CardGroup cols={2}>
   <Card title="Why Stablecoin Oracles?" icon="circle-question" href="/why-stablecoin-focused-oracles">
     Understand the gap IFÁ Labs was built to fill.
+  </Card>
+
+  <Card title="Supported Assets" icon="coins" href="/supported-assets">
+    Full list of supported feeds with asset IDs and network availability.
   </Card>
 </CardGroup>

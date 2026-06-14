@@ -44,6 +44,14 @@
             ]
           },
           {
+            "group": "Sui Move",
+            "pages": [
+              "sui-integration",
+              "sui-read-latest-price",
+              "sui-function-reference"
+            ]
+          },
+          {
             "group": "MCP Server (new)",
             "pages": [
               "what-is-the-ifa-labs-mcp-server",
@@ -103,6 +111,7 @@
         "pages": [
           "supported-assets-full-table-with-zarp-added",
           "network-information",
+          "testnet-faucet",
           "changelog"
         ]
       },

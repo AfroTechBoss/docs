@@ -9,7 +9,7 @@ This page is the authoritative reference for every price feed currently supporte
 
 ## Current Price Feeds
 
-| Asset | Symbol | Category | Decimal | Asset ID (bytes32) |
+| Asset | Symbol | Category | Decimal (EVM) | Asset ID (bytes32) |
 | --- | --- | --- | --- | --- |
 | **Tether** | USDT/USD | Global | -18 | `0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d` |
 | **USD Coin** | USDC/USD | Global | -18 | `0xf989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d` |
@@ -17,6 +17,10 @@ This page is the authoritative reference for every price feed currently supporte
 | **South African Rand Stablecoin** | ZARP/USD | Emerging Market | -18 | `0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8` |
 | **Brazilian Real Stablecoin** | BRZ/USD | Emerging Market | -18 | `0xbc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5` |
 | **Ethereum** | ETH/USD | Reference Asset | -18 | `0x8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0` |
+
+<Info>
+  The `Decimal (EVM)` column reflects EVM scaling where `-18` means divide by `10^18`. On Sui, the same feeds use a positive decimal `18` — the same division applies but the sign convention differs. See [Decimal Precision & Formatting](/decimal-precision-and-formatting) for the full explanation.
+</Info>
 
 <Info>
   ETH/USD is included as a reference asset to enable derived pair calculations between stablecoins and ETH. IFÁ Labs is stablecoin-first — ETH is not a primary feed target.
@@ -50,6 +54,11 @@ All feeds are available on every currently supported network. Asset IDs are iden
 | **Base Mainnet** | Live | `0xA9F17344689C2c2328F94464998db1d3e35B80dC` |
 | **Base Sepolia** | Testnet | `0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b` |
 | **AssetChain Testnet** | Testnet | `0xBAc31e568883774A632275F9c8E7A5Bd117000F7` |
+| **Sui Testnet** | Testnet | `0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f` |
+
+<Warning>
+  On Sui, asset IDs are passed as `vector<u8>` (32-byte vectors) not `bytes32` hex strings. The underlying 32-byte value is identical across all networks — only the format differs. See the [Sui Integration Guide](/sui-read-latest-price) for Move-specific usage examples.
+</Warning>
 
 ---
 
@@ -83,6 +92,35 @@ assets.forEach(symbol => {
 });
 ```
 
+### On Sui
+
+Asset IDs on Sui use the same underlying 32-byte value but are passed as `vector<u8>` instead of `bytes32`. To construct one in Move:
+
+```move
+use ifa_oracle::bytes32;
+
+// Pass the raw 32 bytes — no 0x prefix
+let asset_id = bytes32::new(
+    x"6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d"
+);
+```
+
+In TypeScript using the Sui SDK:
+
+```typescript
+// Strip the 0x prefix and convert to a byte array
+const assetId = Array.from(
+  Buffer.from(
+    "6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d",
+    "hex"
+  )
+);
+```
+
+<Note>
+  Do not include the `0x` prefix when converting asset IDs for Sui. Pass the raw 32 bytes only. The `bytes32::new()` function in the IFÁ Labs Move package validates that the input is exactly 32 bytes and will abort if the length is wrong.
+</Note>
+
 ---
 
 ## Solidity Constants
@@ -95,7 +133,7 @@ pragma solidity ^0.8.0;
 
 /// @notice IFÁ Labs asset ID constants
 /// @dev Generated via keccak256(abi.encodePacked("SYMBOL/USD"))
-///      Identical across all supported networks
+///      Identical across all supported EVM networks
 
 // Global stablecoins
 bytes32 public constant USDT_ASSET_ID =
@@ -117,6 +155,39 @@ bytes32 public constant BRZ_ASSET_ID =
 // Reference asset
 bytes32 public constant ETH_ASSET_ID =
     0x8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0;
+```
+
+### Move Constants (Sui)
+
+```move
+// IFÁ Labs asset ID constants for Sui Move
+// Generated via keccak256("SYMBOL/USD") — same values as EVM, different format
+
+use ifa_oracle::bytes32::{Self, Bytes32};
+
+public fun usdt_asset_id(): Bytes32 {
+    bytes32::new(x"6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d")
+}
+
+public fun usdc_asset_id(): Bytes32 {
+    bytes32::new(x"f989296bde68043d307a2bc0e59de3445defc5f292eb390b80d78162c8a6b13d")
+}
+
+public fun cngn_asset_id(): Bytes32 {
+    bytes32::new(x"83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a")
+}
+
+public fun zarp_asset_id(): Bytes32 {
+    bytes32::new(x"12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8")
+}
+
+public fun brz_asset_id(): Bytes32 {
+    bytes32::new(x"bc60b55b031dce1ee5679098bf2f35d66a94a566124e2b233324d2bafcc6d5b5")
+}
+
+public fun eth_asset_id(): Bytes32 {
+    bytes32::new(x"8c3fb07cab369fe230ca4e45d095f796c4c1a30131f1799766d4fec5ee1325c0")
+}
 ```
 
 ---
@@ -141,6 +212,14 @@ export const IFA_MAX_PRICE_AGE: Record<keyof typeof IFA_ASSET_IDS, number> = {
   "BRZ/USD":  10800,
   "ETH/USD":  5400,
 };
+
+// For Sui — strip 0x prefix and convert to byte arrays
+export const IFA_ASSET_IDS_SUI: Record<keyof typeof IFA_ASSET_IDS, number[]> = Object.fromEntries(
+  Object.entries(IFA_ASSET_IDS).map(([symbol, hex]) => [
+    symbol,
+    Array.from(Buffer.from(hex.slice(2), "hex")),
+  ])
+) as Record<keyof typeof IFA_ASSET_IDS, number[]>;
 ```
 
 ---
@@ -166,9 +245,15 @@ IFA_MAX_PRICE_AGE = {
     "ETH/USD":  5400,
 }
 
-# Convert hex strings to bytes for web3.py
+# For EVM — convert hex strings to bytes for web3.py
 IFA_ASSET_IDS_BYTES = {
     symbol: bytes.fromhex(asset_id[2:])
+    for symbol, asset_id in IFA_ASSET_IDS.items()
+}
+
+# For Sui — same byte values, list format for Sui SDK
+IFA_ASSET_IDS_SUI = {
+    symbol: list(bytes.fromhex(asset_id[2:]))
     for symbol, asset_id in IFA_ASSET_IDS.items()
 }
 ```
@@ -181,15 +266,21 @@ Any two supported assets can be priced against each other using the oracle's der
 
 **Examples of available derived pairs:**
 
-| Pair | Description | Function |
-| --- | --- | --- |
-| CNGN/USDT | Nigerian naira stablecoin priced in USDT | `getPairbyId(CNGN, USDT, Forward)` |
-| ZARP/USDC | South African rand stablecoin priced in USDC | `getPairbyId(ZARP, USDC, Forward)` |
-| BRZ/USDT | Brazilian real stablecoin priced in USDT | `getPairbyId(BRZ, USDT, Forward)` |
-| USDT/CNGN | USDT priced in CNGN terms | `getPairbyId(CNGN, USDT, Backward)` |
-| ETH/USDC | ETH priced in USDC terms | `getPairbyId(ETH, USDC, Forward)` |
+| Pair | Description | EVM Function | Sui Function |
+| --- | --- | --- | --- |
+| CNGN/USDT | Nigerian naira stablecoin priced in USDT | `getPairbyId(CNGN, USDT, Forward)` | `get_pair_by_id(&feed, cngn_id, usdt_id, 0)` |
+| ZARP/USDC | South African rand stablecoin priced in USDC | `getPairbyId(ZARP, USDC, Forward)` | `get_pair_by_id(&feed, zarp_id, usdc_id, 0)` |
+| BRZ/USDT | Brazilian real stablecoin priced in USDT | `getPairbyId(BRZ, USDT, Forward)` | `get_pair_by_id(&feed, brz_id, usdt_id, 0)` |
+| USDT/CNGN | USDT priced in CNGN terms | `getPairbyId(CNGN, USDT, Backward)` | `get_pair_by_id(&feed, cngn_id, usdt_id, 1)` |
+| ETH/USDC | ETH priced in USDC terms | `getPairbyId(ETH, USDC, Forward)` | `get_pair_by_id(&feed, eth_id, usdc_id, 0)` |
 
-Any combination of the six supported assets is computable as a derived pair. See [Function Reference](/function-reference) for the full derived pair API.
+Direction values: `0` = Forward (asset0 / asset1), `1` = Backward (asset1 / asset0).
+
+Any combination of the six supported assets is computable as a derived pair. See [Function Reference](/function-reference) for the full EVM derived pair API, or the [Sui Function Reference](/sui-function-reference) for Move.
+
+<Warning>
+  On Sui, derived pair functions abort if either underlying asset does not exist in the feed — they do not return a false flag like the EVM `exists` boolean. Always verify both assets exist with `get_asset_info` before calling any pair function on Sui.
+</Warning>
 
 ---
 
@@ -232,7 +323,7 @@ When submitting a request, include:
 
 <CardGroup cols={2}>
   <Card title="Network Information" icon="network-wired" href="/network-information">
-    RPC endpoints, chain IDs, and block explorer links for all supported networks.
+    RPC endpoints, chain IDs, and explorer links for all supported networks.
   </Card>
 
   <Card title="Working with Asset IDs" icon="fingerprint" href="/working-with-asset-ids">

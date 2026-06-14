@@ -1,15 +1,15 @@
 ---
 title: "Contract Addresses"
-description: "Verified deployment addresses for the IFÁ Labs oracle contract across all supported networks — with block explorer links and verification guidance."
+description: "Verified deployment addresses for the IFÁ Labs oracle across all supported networks — EVM contract addresses and Sui object IDs, with explorer links and verification guidance."
 ---
 
-IFÁ Labs deploys an identical oracle contract across every supported network. The same interface, the same asset IDs, and the same function signatures work on every deployment. The only thing that changes between networks is the contract address.
+IFÁ Labs deploys oracle infrastructure across every supported network. On EVM chains, this is a single smart contract address. On Sui, it is a set of shared objects — a Package, a Feed Object, and a Verifier Object.
 
-This page is the authoritative reference for all deployed addresses. Verify every address against this page and the on-chain source before using it in production.
+This page is the authoritative reference for all deployed addresses and object IDs. Verify every value against this page and the on-chain source before using it in production.
 
 ---
 
-## Live Deployments
+## EVM Live Deployments
 
 | Network | Type | Contract Address | Block Explorer |
 | --- | --- | --- | --- |
@@ -23,7 +23,7 @@ This page is the authoritative reference for all deployed addresses. Verify ever
 
 ---
 
-## Read Contract Links
+## EVM Read Contract Links
 
 Access the oracle's read functions directly from the block explorer without writing any code:
 
@@ -35,23 +35,94 @@ Access the oracle's read functions directly from the block explorer without writ
 
 ---
 
+## Sui Deployments
+
+On Sui, IFÁ Labs is deployed as a native Move package. There are three object IDs you need to know:
+
+| Object | ID | Description |
+| --- | --- | --- |
+| **Package ID** | `0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f` | The published Move package. Used when importing the module in your own Move contracts. |
+| **Feed Object ID** | `0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a` | The shared `IfaPriceFeed` object. Pass this when reading prices. |
+| **Verifier Object ID** | `0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5` | The shared `IfaPriceFeedVerifier` object. Used by the relayer to submit price updates. |
+
+| Network | Status | Explorer |
+| --- | --- | --- |
+| **Sui Testnet** | Testnet | [View package on Suiscan](https://suiscan.xyz/testnet/object/0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f) |
+
+<Info>
+  When reading prices on Sui, always pass the **Feed Object ID** — not the Package ID. The Package ID is only needed when referencing the module as a dependency in your own Move package's `Move.toml`.
+</Info>
+
+### Using Sui Object IDs in Move
+
+```move
+// In your Move.toml — reference the package as a dependency
+[dependencies]
+ifa_oracle = { git = "https://github.com/IFA-Labs/oracle_contract_sui.git", rev = "main" }
+
+// In your Move source — pass the feed object by reference
+use ifa_oracle::price_feed::{Self, IfaPriceFeed};
+
+public fun read_price(feed: &IfaPriceFeed, asset_id: vector<u8>) {
+    let asset_index = bytes32::new(asset_id);
+    let (price_feed, exists) = price_feed::get_asset_info(feed, asset_index);
+    // ...
+}
+```
+
+### Using Sui Object IDs in TypeScript
+
+```typescript
+import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
+import { Transaction } from "@mysten/sui/transactions";
+
+const client = new SuiClient({ url: getFullnodeUrl("testnet") });
+
+// These are the object IDs you pass in transactions
+const IFA_SUI_TESTNET = {
+  packageId:  "0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f",
+  feedId:     "0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a",
+  verifierId: "0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5",
+} as const;
+
+// Read a price via a devInspect transaction
+const tx = new Transaction();
+tx.moveCall({
+  target: `${IFA_SUI_TESTNET.packageId}::price_feed::get_asset_info`,
+  arguments: [
+    tx.object(IFA_SUI_TESTNET.feedId),
+    tx.pure.vector("u8", Array.from(
+      Buffer.from("6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d", "hex")
+    )),
+  ],
+});
+
+const result = await client.devInspectTransactionBlock({
+  transactionBlock: tx,
+  sender: "0x0000000000000000000000000000000000000000000000000000000000000000",
+});
+```
+
+---
+
 ## Upcoming Deployments
 
 | Network | Status | Target | Notes |
 | --- | --- | --- | --- |
+| **Sui Mainnet** | Planned | TBD | Full production deployment following testnet validation |
 | **AssetChain Mainnet** | Planned | TBD | Full production deployment for RWA-focused protocols |
-| **Solana** | Planned | TBD | Native Solana program — different interface from EVM contracts |
+| **Solana** | Planned | TBD | Native Solana program — different interface from EVM and Sui contracts |
 | **Optimism** | Planned | TBD | Additional EVM L2 |
 | **Arbitrum** | Planned | TBD | Additional EVM L2 |
 | **Polygon zkEVM** | Planned | TBD | Additional EVM L2 |
 
 <Note>
-  Contract addresses for upcoming deployments will be added to this page on launch day. Follow [@ifalabs](https://x.com/ifalabs) or join the [Telegram](https://t.me/ifalabs) for deployment announcements.
+  Contract addresses and object IDs for upcoming deployments will be added to this page on launch day. Follow [@ifalabs](https://x.com/ifalabs) or join the [Telegram](https://t.me/ifalabs) for deployment announcements.
 </Note>
 
 ---
 
-## Using Addresses in Your Contracts
+## Using EVM Addresses in Your Contracts
 
 ### Constant Declaration (Recommended)
 
@@ -87,7 +158,7 @@ Then pass the correct address per network in your deploy script:
         contract DeployScript is Script {
             function run() external {
                 address oracle = vm.envAddress("ORACLE_ADDRESS");
-                
+    
                 vm.startBroadcast();
                 new MyProtocol(oracle);
                 vm.stopBroadcast();
@@ -109,14 +180,14 @@ Then pass the correct address per network in your deploy script:
     ```javascript
         // scripts/deploy.js
         const ORACLE_ADDRESSES = {
-            "base-mainnet": "0xA9F17344689C2c2328F94464998db1d3e35B80dC",
-            "base-sepolia": "0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b",
+            "base-mainnet":       "0xA9F17344689C2c2328F94464998db1d3e35B80dC",
+            "base-sepolia":       "0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b",
             "assetchain-testnet": "0xBAc31e568883774A632275F9c8E7A5Bd117000F7",
         };
     
         async function main() {
-            const network  = hre.network.name;
-            const oracle   = ORACLE_ADDRESSES[network];
+            const network = hre.network.name;
+            const oracle  = ORACLE_ADDRESSES[network];
     
             if (!oracle) throw new Error(`No oracle address for network: ${network}`);
     
@@ -135,22 +206,40 @@ Then pass the correct address per network in your deploy script:
 
 ---
 
-## Verifying the Contract On-Chain
+## Verifying EVM Contracts On-Chain
 
-Before using any address in production, verify it on the block explorer:
+Before using any EVM address in production, verify it on the block explorer:
 
 <Steps>
   <Step title="Open the contract on Basescan">
     Navigate to the address on [Basescan](https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC). The contract should show a green checkmark indicating the source code is verified.
   </Step>
   <Step title="Confirm the contract name">
-    Under the **Contract** tab, confirm the contract name matches `IfaPriceFeed` or the expected IFÁ Labs contract name. A mismatch means you have the wrong address.
+    Under the **Contract** tab, confirm the contract name matches `IfaPriceFeed`. A mismatch means you have the wrong address.
   </Step>
   <Step title="Cross-reference the ABI">
-    The verified ABI on Basescan should include `getAssetInfo`, `getAssetsInfo`, and the derived pair functions. If these functions are absent, the address is wrong.
+    The verified ABI should include `getAssetInfo`, `getAssetsInfo`, and the derived pair functions. If these are absent, the address is wrong.
   </Step>
   <Step title="Call getAssetInfo">
-    Under **Read Contract**, call `getAssetInfo` with a known asset ID — for example, USDT/USD: `0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d`. A valid response with `exists = true` and a reasonable price confirms the contract is live and correctly addressed.
+    Under **Read Contract**, call `getAssetInfo` with the USDT/USD asset ID: `0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d`. A valid response with `exists = true` and a reasonable price confirms the contract is live and correctly addressed.
+  </Step>
+</Steps>
+
+---
+
+## Verifying Sui Objects On-Chain
+
+Before using any Sui object ID, verify it on Suiscan:
+
+<Steps>
+  <Step title="Open the package on Suiscan">
+    Navigate to the [Package ID on Suiscan](https://suiscan.xyz/testnet/object/0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f). Confirm the package name is `ifa_oracle` and the modules listed include `price_feed`, `verifier`, and `bytes32`.
+  </Step>
+  <Step title="Verify the Feed Object">
+    Navigate to the [Feed Object ID on Suiscan](https://suiscan.xyz/testnet/object/0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a). Confirm the object type is `ifa_oracle::price_feed::IfaPriceFeed` and it is a shared object.
+  </Step>
+  <Step title="Check recent transactions">
+    On the Feed Object page, review recent transactions. You should see `submit_price_feed` calls from the relayer — confirming the oracle is actively updating prices.
   </Step>
 </Steps>
 
@@ -158,7 +247,7 @@ Before using any address in production, verify it on the block explorer:
 
 ## Network Configuration Reference
 
-Full network details for integrating IFÁ Labs into your development environment:
+### EVM Networks
 
 | Parameter | Base Mainnet | Base Sepolia | AssetChain Testnet |
 | --- | --- | --- | --- |
@@ -169,28 +258,49 @@ Full network details for integrating IFÁ Labs into your development environment
 | **Oracle Address** | `0xA9F17344689C2c2328F94464998db1d3e35B80dC` | `0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b` | `0xBAc31e568883774A632275F9c8E7A5Bd117000F7` |
 | **Faucet** | N/A | [base.org/faucet](https://www.base.org/faucet) | N/A |
 
+### Sui Testnet
+
+| Parameter | Value |
+| --- | --- |
+| **Network** | Sui Testnet |
+| **Explorer** | [suiscan.xyz/testnet](https://suiscan.xyz/testnet) |
+| **Package ID** | `0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f` |
+| **Feed Object ID** | `0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a` |
+| **Verifier Object ID** | `0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5` |
+| **Faucet** | [faucet.sui.io](https://faucet.sui.io) |
+
 ---
 
 ## Reporting an Address Discrepancy
 
-If you encounter an address that claims to be an IFÁ Labs oracle but is not listed on this page, do not use it and report it immediately:
+If you encounter an address or object ID that claims to be an IFÁ Labs oracle but is not listed on this page, do not use it and report it immediately:
 
 - **Email:** [support@ifalabs.com](mailto:support@ifalabs.com)
 - **Telegram:** [t.me/ifalabs](https://t.me/ifalabs)
 - **GitHub:** [IFA-Labs/oracle\_contract/issues](https://github.com/IFA-Labs/oracle_contract/issues)
 
-Include the suspicious address, the network it was found on, and where you encountered it. Address impersonation is a common attack vector in DeFi — reporting suspicious addresses quickly protects the broader ecosystem.
+Include the suspicious address or object ID, the network it was found on, and where you encountered it. Address impersonation is a common attack vector in DeFi — reporting suspicious addresses quickly protects the broader ecosystem.
 
 ---
 
 ## Next Steps
 
 <CardGroup cols={2}>
-  <Card title="Function Reference" icon="code" href="/function-reference">
-    Complete API reference for all oracle contract functions and return types.
+  <Card title="Function Reference (EVM)" icon="code" href="/function-reference">
+    Complete API reference for all EVM oracle contract functions and return types.
   </Card>
 
+  <Card title="Sui Integration Guide" icon="code" href="/sui-read-latest-price">
+    Read prices from the IFÁ Labs oracle on Sui using Move or the TypeScript SDK.
+  </Card>
+</CardGroup>
+
+<CardGroup cols={2}>
   <Card title="ABI Download" icon="download" href="/abi-download">
-    Get the official ABI for use in your development tools and scripts.
+    Get the official EVM ABI for use in your development tools and scripts.
+  </Card>
+
+  <Card title="Network Information" icon="network-wired" href="/network-information">
+    Full network reference including RPC endpoints, object IDs, and faucet links.
   </Card>
 </CardGroup>

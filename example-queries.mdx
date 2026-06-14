@@ -152,6 +152,9 @@ Verified: active feed on Base Mainnet ✓
 Use in Solidity:
 bytes32 public constant ZARP_ASSET_ID =
     0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8;
+
+Use in Sui Move:
+bytes32::new(x"12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8")
 ```
 
 ---
@@ -168,7 +171,8 @@ bytes32 public constant ZARP_ASSET_ID =
 
 ```solidity
 // IFÁ Labs Asset ID Constants
-// Source: IFÁ Labs MCP Server — Base Mainnet
+// Source: IFÁ Labs MCP Server
+// Identical across all networks — EVM (bytes32) and Sui (vector<u8>)
 
 bytes32 public constant USDT_ASSET_ID =
     0x6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d;
@@ -272,7 +276,7 @@ Last updated within the past 30 minutes.
 
 Queries designed for developers actively building integrations.
 
-### Pre-Integration Setup Check
+### Pre-Integration Setup Check (EVM)
 
 **Prompt:**
 
@@ -297,6 +301,38 @@ USDT/USD  →  ✓ Fresh (updated 7 minutes ago)
 CNGN/USD  →  ✓ Fresh (updated 28 minutes ago)
 
 You're clear to proceed with integration.
+```
+
+---
+
+### Pre-Integration Setup Check (Sui)
+
+**Prompt:**
+
+> "I'm building a Sui Move contract and need the IFÁ Labs object IDs for Sui Testnet, plus the asset IDs for USDT and CNGN in Move format."
+
+**Tools called:** `get_network_info`, `get_asset_id` × 2
+
+**Response:**
+
+```text
+IFÁ Labs Integration Setup — Sui Testnet
+
+Package ID:
+0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f
+
+Feed Object ID (pass this when reading prices):
+0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a
+
+Verifier Object ID:
+0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5
+
+Asset IDs in Move format:
+USDT/USD  →  bytes32::new(x"6ca0cef6107263f3b09a51448617b659278cff744f0e702c24a2f88c91e65a0d")
+CNGN/USD  →  bytes32::new(x"83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a")
+
+Note: Always pass the Feed Object ID — not the Package ID — when
+calling get_asset_info or any price read function in your Move contract.
 ```
 
 ---
@@ -347,6 +383,7 @@ Match:    ✓ Correct
 Verified: Active feed on Base Mainnet ✓
 
 Your hardcoded constant is correct.
+Works on both EVM (bytes32) and Sui (vector<u8>) — same underlying bytes.
 ```
 
 ---
@@ -449,7 +486,7 @@ Other feeds: All healthy ✓
 
 Quick lookups for network configuration and contract details.
 
-### Get Contract Address
+### Get EVM Contract Address
 
 **Prompt:**
 
@@ -462,15 +499,46 @@ Quick lookups for network configuration and contract details.
 ```text
 IFÁ Labs Oracle — Base Mainnet
 
-Contract Address:
-0xA9F17344689C2c2328F94464998db1d3e35B80dC
+Network Type:     EVM
+Contract Address: 0xA9F17344689C2c2328F94464998db1d3e35B80dC
+Block Explorer:   https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC
+Chain ID:         8453
+RPC URL:          https://mainnet.base.org
+Status:           Live
+```
 
-Block Explorer:
-https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC
+---
 
-Chain ID:   8453
-RPC URL:    https://mainnet.base.org
-Status:     Live
+### Get Sui Object IDs
+
+**Prompt:**
+
+> "What are the IFÁ Labs object IDs on Sui Testnet?"
+
+**Tools called:** `get_network_info`
+
+**Response:**
+
+```text
+IFÁ Labs Oracle — Sui Testnet
+
+Network Type:  Sui Move
+Status:        Testnet
+
+Package ID:
+0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f
+
+Feed Object ID (use this when reading prices):
+0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a
+
+Verifier Object ID:
+0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5
+
+Explorer:
+https://suiscan.xyz/testnet/object/0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f
+
+Note: Pass the Feed Object ID — not the Package ID — when calling
+price read functions in your Move contract or TypeScript SDK.
 ```
 
 ---
@@ -488,26 +556,30 @@ Status:     Live
 ```text
 IFÁ Labs Network Reference
 
-Base Mainnet
-  Chain ID:         8453
-  Oracle:           0xA9F17344689C2c2328F94464998db1d3e35B80dC
-  RPC:              https://mainnet.base.org
-  Explorer:         https://basescan.org
-  Status:           Live ✓
+Base Mainnet  [EVM — Live]
+  Chain ID:  8453
+  Oracle:    0xA9F17344689C2c2328F94464998db1d3e35B80dC
+  RPC:       https://mainnet.base.org
+  Explorer:  https://basescan.org
 
-Base Sepolia
-  Chain ID:         84532
-  Oracle:           0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b
-  RPC:              https://sepolia.base.org
-  Explorer:         https://sepolia.basescan.org
-  Status:           Testnet
+Base Sepolia  [EVM — Testnet]
+  Chain ID:  84532
+  Oracle:    0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b
+  RPC:       https://sepolia.base.org
+  Explorer:  https://sepolia.basescan.org
 
-AssetChain Testnet
-  Chain ID:         42421
-  Oracle:           0xBAc31e568883774A632275F9c8E7A5Bd117000F7
-  RPC:              https://enugu-rpc.assetchain.org
-  Explorer:         https://scan-testnet.assetchain.org
-  Status:           Testnet
+AssetChain Testnet  [EVM — Testnet]
+  Chain ID:  42421
+  Oracle:    0xBAc31e568883774A632275F9c8E7A5Bd117000F7
+  RPC:       https://enugu-rpc.assetchain.org
+  Explorer:  https://scan-testnet.assetchain.org
+
+Sui Testnet  [Sui Move — Testnet]
+  Package:   0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f
+  Feed ID:   0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a
+  Verifier:  0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5
+  RPC:       https://fullnode.testnet.sui.io
+  Explorer:  https://suiscan.xyz/testnet
 ```
 
 ---
@@ -518,7 +590,9 @@ Getting the best results from the IFÁ Labs MCP Server comes down to specificity
 
 **Always specify the asset in `"SYMBOL/USD"` format when possible.** "CNGN price" works, but "CNGN/USD price on Base Mainnet" is unambiguous and gives the model everything it needs to call the right tool with the right parameters without guessing.
 
-**Specify the network when it matters.** If you're working on a testnet integration, say "Base Sepolia" explicitly. Without a network qualifier, the server defaults to Base Mainnet.
+**Specify the network when it matters.** If you're working on a testnet integration, say "Base Sepolia" or "Sui Testnet" explicitly. Without a network qualifier, the server defaults to Base Mainnet.
+
+**For Sui, ask for object IDs — not a contract address.** Prompts like "give me the Sui Testnet object IDs" or "what is the Feed Object ID on Sui Testnet" will trigger `get_network_info` and return the correct Sui-specific identifiers. Price read tools (`get_asset_price`, etc.) only work on EVM networks.
 
 **State your threshold when checking freshness.** "Is the feed fresh?" leaves the threshold ambiguous. "Is the feed fresh within a 30-minute window?" gives the tool a precise `max_age_seconds` value to evaluate against.
 

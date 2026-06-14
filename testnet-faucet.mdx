@@ -1,0 +1,360 @@
+---
+title: "Testnet Faucet"
+description: "Claim testnet SUI and WAL tokens from the IFÁ Labs multi-token faucet on Sui Testnet — for development and testing against the IFÁ Labs oracle."
+---
+
+The IFÁ Labs faucet is a multi-token testnet faucet deployed on Sui Testnet. It allows developers building on the IFÁ Labs Sui oracle to claim testnet tokens for development and integration testing — without needing to source tokens from external faucets.
+
+Currently supported tokens: **SUI** and **WAL**.
+
+---
+
+## Faucet Contract Details
+
+| Object | ID |
+| --- | --- |
+| **Package ID** | `0xf77385d9dc49cf4774c0411a2b36d89d294ad5fe42ab1f52cc7d515044b1fa27` |
+| **Registry ID** | `0x5c0dc844ba7647af146e9edf7618bdbf47025dd0816e60db7ad9256cafda1054` |
+| **Network** | Sui Testnet |
+
+---
+
+## Available Tokens
+
+| Token | Symbol | Claim Amount | Cooldown | Type |
+| --- | --- | --- | --- | --- |
+| Sui | SUI | 0.5 SUI | 4 hours | Official |
+| Walrus | WAL | 0.5 WAL | 4 hours | Official |
+
+<Note>
+  Cooldown is tracked per recipient per token. After claiming SUI, you must wait 4 hours before claiming SUI again. WAL has its own independent cooldown — you can claim both in the same session.
+</Note>
+
+---
+
+## Claim via Sui CLI
+
+The fastest way to claim tokens without writing any code.
+
+### Prerequisites
+
+- Sui CLI installed — [docs.sui.io/guides/developer/getting-started/sui-install](https://docs.sui.io/guides/developer/getting-started/sui-install)
+- Active address on Sui Testnet with enough SUI for gas
+
+Set your active environment to testnet:
+
+```bash
+sui client switch --env testnet
+```
+
+Verify your active address:
+
+```bash
+sui client active-address
+```
+
+---
+
+### Claim SUI
+
+```bash
+sui client call \
+  --package 0xf77385d9dc49cf4774c0411a2b36d89d294ad5fe42ab1f52cc7d515044b1fa27 \
+  --module faucet \
+  --function claim_tokens \
+  --type-args 0x2::sui::SUI \
+  --args \
+    0x5c0dc844ba7647af146e9edf7618bdbf47025dd0816e60db7ad9256cafda1054 \
+    0x6 \
+    <YOUR_ADDRESS> \
+  --gas-budget 10000000
+```
+
+Replace `<YOUR_ADDRESS>` with your Sui wallet address.
+
+---
+
+### Claim WAL
+
+```bash
+sui client call \
+  --package 0xf77385d9dc49cf4774c0411a2b36d89d294ad5fe42ab1f52cc7d515044b1fa27 \
+  --module faucet \
+  --function claim_tokens \
+  --type-args 0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL \
+  --args \
+    0x5c0dc844ba7647af146e9edf7618bdbf47025dd0816e60db7ad9256cafda1054 \
+    0x6 \
+    <YOUR_ADDRESS> \
+  --gas-budget 10000000
+```
+
+<Info>
+  `0x6` is the Sui system Clock object — it is the same address on every Sui network. You do not need to look it up or replace it.
+</Info>
+
+---
+
+## Claim via TypeScript SDK
+
+For applications and scripts that need to trigger claims programmatically.
+
+```typescript
+import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
+import { Transaction }               from "@mysten/sui/transactions";
+import { Ed25519Keypair }            from "@mysten/sui/keypairs/ed25519";
+
+const client = new SuiClient({ url: getFullnodeUrl("testnet") });
+
+const FAUCET = {
+  packageId:  "0xf77385d9dc49cf4774c0411a2b36d89d294ad5fe42ab1f52cc7d515044b1fa27",
+  registryId: "0x5c0dc844ba7647af146e9edf7618bdbf47025dd0816e60db7ad9256cafda1054",
+  clockId:    "0x6",
+} as const;
+
+const TOKEN_TYPES = {
+  SUI: "0x2::sui::SUI",
+  WAL: "0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL",
+} as const;
+
+async function claimToken(
+  keypair:   Ed25519Keypair,
+  tokenType: string,
+  recipient: string,
+) {
+  const tx = new Transaction();
+
+  tx.moveCall({
+    target:    `${FAUCET.packageId}::faucet::claim_tokens`,
+    typeArguments: [tokenType],
+    arguments: [
+      tx.object(FAUCET.registryId),
+      tx.object(FAUCET.clockId),
+      tx.pure.address(recipient),
+    ],
+  });
+
+  const result = await client.signAndExecuteTransaction({
+    signer:      keypair,
+    transaction: tx,
+    options: {
+      showEffects: true,
+      showEvents:  true,
+    },
+  });
+
+  if (result.effects?.status.status !== "success") {
+    throw new Error(`Claim failed: ${result.effects?.status.error}`);
+  }
+
+  console.log(`Claimed ${tokenType} successfully`);
+  console.log(`Transaction: ${result.digest}`);
+
+  return result;
+}
+
+// Load keypair from environment
+const keypair   = Ed25519Keypair.fromSecretKey(process.env.SUI_PRIVATE_KEY!);
+const recipient = keypair.toSuiAddress();
+
+// Claim SUI
+await claimToken(keypair, TOKEN_TYPES.SUI, recipient);
+
+// Claim WAL (independent cooldown — can claim in same session)
+await claimToken(keypair, TOKEN_TYPES.WAL, recipient);
+```
+
+---
+
+## Check Cooldown Status
+
+Before claiming, check whether your address is eligible to claim again.
+
+### Via TypeScript SDK
+
+```typescript
+async function getRemainingCooldown(
+  account:   string,
+  tokenType: string,
+): Promise<number> {
+  const tx = new Transaction();
+
+  tx.moveCall({
+    target:        `${FAUCET.packageId}::faucet::get_remaining_cooldown`,
+    typeArguments: [tokenType],
+    arguments: [
+      tx.object(FAUCET.registryId),
+      tx.object(FAUCET.clockId),
+      tx.pure.address(account),
+    ],
+  });
+
+  const result = await client.devInspectTransactionBlock({
+    transactionBlock: tx,
+    sender: account,
+  });
+
+  if (result.effects.status.status !== "success") {
+    return 0;
+  }
+
+  // Return value is remaining cooldown in milliseconds
+  const returnValues = result.results?.[0]?.returnValues;
+  if (!returnValues || returnValues.length === 0) return 0;
+
+  const remainingMs = Number(
+    new DataView(new Uint8Array(returnValues[0][0]).buffer).getBigUint64(0, true)
+  );
+
+  return remainingMs;
+}
+
+const remainingMs = await getRemainingCooldown(recipient, TOKEN_TYPES.SUI);
+
+if (remainingMs === 0) {
+  console.log("SUI: Ready to claim");
+} else {
+  const remainingMins = Math.ceil(remainingMs / 60_000);
+  console.log(`SUI: Cooldown active — ${remainingMins} minutes remaining`);
+}
+```
+
+### Via Sui CLI
+
+```bash
+sui client call \
+  --package 0xf77385d9dc49cf4774c0411a2b36d89d294ad5fe42ab1f52cc7d515044b1fa27 \
+  --module faucet \
+  --function get_remaining_cooldown \
+  --type-args 0x2::sui::SUI \
+  --args \
+    0x5c0dc844ba7647af146e9edf7618bdbf47025dd0816e60db7ad9256cafda1054 \
+    0x6 \
+    <YOUR_ADDRESS> \
+  --gas-budget 10000000
+```
+
+Returns `0` if ready to claim. Returns the remaining cooldown in milliseconds if active.
+
+---
+
+## Check If You Can Claim
+
+A single helper that checks blacklist status, token pause state, balance availability, and cooldown in one call:
+
+```typescript
+async function canClaim(
+  caller:    string,
+  recipient: string,
+  tokenType: string,
+): Promise<boolean> {
+  const tx = new Transaction();
+
+  tx.moveCall({
+    target:        `${FAUCET.packageId}::faucet::can_claim`,
+    typeArguments: [tokenType],
+    arguments: [
+      tx.object(FAUCET.registryId),
+      tx.object(FAUCET.clockId),
+      tx.pure.address(caller),
+      tx.pure.address(recipient),
+    ],
+  });
+
+  const result = await client.devInspectTransactionBlock({
+    transactionBlock: tx,
+    sender: caller,
+  });
+
+  if (result.effects.status.status !== "success") return false;
+
+  const returnValues = result.results?.[0]?.returnValues;
+  if (!returnValues || returnValues.length === 0) return false;
+
+  return returnValues[0][0][0] === 1;
+}
+
+const eligible = await canClaim(recipient, recipient, TOKEN_TYPES.SUI);
+console.log(`Can claim SUI: ${eligible}`);
+```
+
+---
+
+## Common Errors
+
+| Error | Cause | Fix |
+| --- | --- | --- |
+| `E_COOLDOWN_ACTIVE` | Claimed within the last 4 hours | Wait for cooldown to expire — check with `get_remaining_cooldown` |
+| `E_INSUFFICIENT_BALANCE` | Faucet has run out of this token | Check faucet balance — contact IFÁ Labs via [Telegram](https://t.me/ifalabs) |
+| `E_BLACKLISTED` | Your address is blacklisted | Contact IFÁ Labs via [support@ifalabs.com](mailto:support@ifalabs.com) |
+| `E_FAUCET_PAUSED` | The token faucet is temporarily paused | Check [Telegram](https://t.me/ifalabs) for announcements |
+| `E_TOKEN_NOT_FOUND` | Wrong type argument passed | Verify the token type string matches exactly |
+
+---
+
+## Check Faucet Balance
+
+If you suspect the faucet is running low, check the available balance before claiming:
+
+```typescript
+async function getFaucetBalance(tokenType: string): Promise<number> {
+  const tx = new Transaction();
+
+  tx.moveCall({
+    target:        `${FAUCET.packageId}::faucet::get_token_balance`,
+    typeArguments: [tokenType],
+    arguments: [tx.object(FAUCET.registryId)],
+  });
+
+  const result = await client.devInspectTransactionBlock({
+    transactionBlock: tx,
+    sender: "0x0000000000000000000000000000000000000000000000000000000000000000",
+  });
+
+  if (result.effects.status.status !== "success") return 0;
+
+  const returnValues = result.results?.[0]?.returnValues;
+  if (!returnValues || returnValues.length === 0) return 0;
+
+  return Number(
+    new DataView(new Uint8Array(returnValues[0][0]).buffer).getBigUint64(0, true)
+  );
+}
+
+const suiBalance = await getFaucetBalance(TOKEN_TYPES.SUI);
+console.log(`Faucet SUI balance: ${suiBalance / 1_000_000_000} SUI`);
+```
+
+---
+
+## Need More Tokens?
+
+If the faucet balance is depleted or you need tokens in bulk for testing:
+
+- **Official Sui Faucet** for SUI: [faucet.sui.io](https://faucet.sui.io)
+- **Telegram:** [t.me/ifalabs](https://t.me/ifalabs) — ping the team to top up the faucet
+- **Email:** [support@ifalabs.com](mailto:support@ifalabs.com)
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Read Latest Price (Sui)" icon="circle-dot" href="/sui-read-latest-price">
+    Start reading live stablecoin prices from the IFÁ Labs oracle on Sui.
+  </Card>
+
+  <Card title="Sui Function Reference" icon="code" href="/sui-function-reference">
+    Complete reference for all IFÁ Labs Sui Move oracle functions.
+  </Card>
+</CardGroup>
+
+<CardGroup cols={2}>
+  <Card title="Network Information" icon="network-wired" href="/network-information">
+    Full network reference including all Sui Testnet object IDs.
+  </Card>
+
+  <Card title="Get Help" icon="message" href="/get-help">
+    Contact the IFÁ Labs team directly.
+  </Card>
+</CardGroup>
