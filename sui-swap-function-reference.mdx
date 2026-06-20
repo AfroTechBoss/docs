@@ -1,0 +1,586 @@
+---
+title: "Swap Function Reference"
+description: "Complete reference for every public function in the IFÁ Labs Sui Swap Contract — deposit, withdraw, swap, sweep, and quote functions with verified signatures, error codes, and examples."
+---
+
+This page is the complete reference for the IFÁ Labs Swap Contract. It covers both the **periphery module** (`ifalabs::hetero_swap_periphery`) — the intended entry point for integrators — and the **core module** (`ifalabs::hetero_swap_core`), which contains the actual logic, error codes, and admin functions.
+
+For the underlying price feed this contract consumes, see [Sui Function Reference](/sui-function-reference).
+
+---
+
+## Package Structure
+
+| Module | Description |
+| --- | --- |
+| `ifalabs::hetero_swap_periphery` | Public entry points — deposit, withdraw, swap, sweep, quote. **Use this for integration.** |
+| `ifalabs::hetero_swap_core` | Core logic, all error codes, and admin-only functions |
+| `ifalabs::hlp` | The `HLP` liquidity provider token type |
+
+<Info>
+  Every periphery function is a thin wrapper that delegates directly to the matching core function. There is no safety difference between calling periphery vs. core — but periphery is the documented, stable interface.
+</Info>
+
+---
+
+## Data Types
+
+### `Pool`
+
+The central shared object coordinating the swap contract.
+
+```move
+public struct Pool has key {
+    id:                     UID,
+    paused:                 bool,
+    lp_treasury_cap:        TreasuryCap<HLP>,
+    total_lp_supply:        u64,
+    accounted_value_usd:    u256,
+    lp_fee_bps:             u64,
+    protocol_fee_bps:       u64,
+    max_price_age_ms:       u64,
+    sync_interval_ms:       u64,
+    protocol_fee_recipient: address,
+    assets:                 VecSet<TypeName>,
+    asset_configs:          Table<TypeName, AssetConfig>,
+}
+```
+
+Pass by `&mut Pool` for state-changing operations and `&Pool` for read-only quotes and summaries.
+
+---
+
+### `AssetConfig`
+
+Per-asset configuration stored inside the `Pool`. Returned as part of `get_asset_summary`.
+
+```move
+public struct AssetConfig has copy, drop, store {
+    enabled:           bool,
+    asset_index:       Bytes32,  // the oracle asset ID for this token
+    coin_decimals:     u8,
+    target_weight_bps: u64,
+    max_trade_bps:     u64,
+    max_withdraw_bps:  u64,
+    min_liquidity:     u64,
+}
+```
+
+---
+
+### `AssetVault<T>`
+
+A generic shared object holding token reserves and cached valuation for asset type `T`.
+
+```move
+public struct AssetVault<phantom T> has key, store {
+    id:               UID,
+    balance:          Balance<T>,
+    cached_value_usd: u256,  // updated periodically via maybe_sync_asset
+    last_sync_ms:     u64,
+}
+```
+
+You must pass the vault matching the coin type you're operating on — Move's generics enforce this at compile time.
+
+---
+
+### `ProtocolFeeVault<T>`
+
+A generic shared object accumulating the protocol's fee share for asset type `T`.
+
+```move
+public struct ProtocolFeeVault<phantom T> has key, store {
+    id:      UID,
+    balance: Balance<T>,
+}
+```
+
+Required as an argument for `swap_exact_input` and `sweep` — not for deposits or withdrawals.
+
+---
+
+## Error Codes
+
+These are the actual error constants from `hetero_swap_core`. Every abort in the swap contract maps to one of these.
+
+| Constant | Value | When It Fires |
+| --- | --- | --- |
+| `E_POOL_PAUSED` | `2` | Any state-changing call while `pool.paused == true` |
+| `E_ASSET_NOT_WHITELISTED` | `3` | Asset type `T` has never been whitelisted in this pool |
+| `E_ASSET_DISABLED` | `4` | Asset is whitelisted but currently disabled (`enabled = false`) |
+| `E_ASSET_ALREADY_WHITELISTED` | `5` | Admin tried to whitelist an asset that's already whitelisted |
+| `E_INVALID_ASSET_INDEX` | `6` | Admin passed a `raw_asset_index` that isn't exactly 32 bytes during whitelisting |
+| `E_INVALID_DECIMALS` | `7` | A decimals value exceeds `MAX_DECIMALS` (30) — internal math guard |
+| `E_INVALID_FEE` | `8` | Fee or weight parameter exceeds `BPS_DENOMINATOR` (10,000), or `lp_fee_bps + protocol_fee_bps` exceeds `MAX_TOTAL_FEE_BPS` (100, i.e. 1%) |
+| `E_ZERO_AMOUNT` | `9` | A deposit, withdrawal, or swap amount evaluates to zero |
+| `E_SAME_ASSET` | `10` | `swap_exact_input` or `quote_exact_input` called with `TIn == TOut` |
+| `E_ORACLE_PRICE_MISSING` | `11` | The oracle returned `exists = false`, or the price is `0` |
+| `E_ORACLE_PRICE_STALE` | `12` | The oracle price (or derived pair) is older than `pool.max_price_age_ms` |
+| `E_INSUFFICIENT_LIQUIDITY` | `13` | The output vault doesn't hold enough of the requested asset |
+| `E_SLIPPAGE` | `14` | Computed output is less than your `min_amount_out` / `min_lp_out` |
+| `E_TRADE_TOO_LARGE` | `15` | Swap output exceeds the asset's `max_trade_bps` of available vault liquidity |
+| `E_WITHDRAW_TOO_LARGE` | `16` | Withdrawal exceeds the asset's `max_withdraw_bps` of available vault liquidity |
+| `E_LP_SUPPLY_ZERO` | `17` | Withdrawal attempted while `total_lp_supply == 0`, or deposit math hit a zero-supply edge case |
+| `E_MATH_OVERFLOW` | `18` | Internal fixed-point math overflowed or an accounting invariant failed |
+| `E_INVALID_RECIPIENT` | `19` | Admin passed the zero address as `protocol_fee_recipient` |
+| `E_MIN_LIQUIDITY` | `20` | A withdrawal or swap would drop a vault below its configured `min_liquidity` floor |
+
+<Warning>
+  `E_ORACLE_PRICE_STALE` and `E_ORACLE_PRICE_MISSING` are the two errors you will hit most often during integration testing. Both originate from the same `get_price_checked` internal function that every deposit, withdrawal, and swap calls before touching any balances.
+</Warning>
+
+---
+
+## Liquidity Functions
+
+### `deposit_liquidity`
+
+Deposits a supported asset into the pool and mints HLP tokens proportional to the deposit's USD value.
+
+```move
+public entry fun deposit_liquidity<T>(
+    pool:       &mut Pool,
+    vault:      &mut AssetVault<T>,
+    feed:       &IfaPriceFeed,
+    coin:       Coin<T>,
+    min_lp_out: u64,
+    clock:      &Clock,
+    ctx:        &mut TxContext,
+)
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `pool` | `&mut Pool` | The shared pool object |
+| `vault` | `&mut AssetVault<T>` | The vault matching the coin type being deposited |
+| `feed` | `&IfaPriceFeed` | The IFÁ Labs oracle feed object |
+| `coin` | `Coin<T>` | The coin object being deposited — fully consumed |
+| `min_lp_out` | `u64` | Minimum acceptable HLP tokens — slippage protection |
+| `clock` | `&Clock` | The Sui system Clock object (`0x6`) |
+| `ctx` | `&mut TxContext` | Standard transaction context |
+
+**Verified abort sequence:**
+
+1. `E_POOL_PAUSED` if the pool is paused
+2. `E_ASSET_NOT_WHITELISTED` / `E_ASSET_DISABLED` if `T` isn't whitelisted or is disabled
+3. `E_ZERO_AMOUNT` if the deposited coin has zero value
+4. `E_ORACLE_PRICE_MISSING` / `E_ORACLE_PRICE_STALE` if the oracle price for `T` is missing or stale
+5. `E_ZERO_AMOUNT` if the computed USD value of the deposit is zero
+6. `E_LP_SUPPLY_ZERO` if this is not the first deposit and `accounted_value_usd` is somehow zero (an invariant guard, not a normal user-facing case)
+7. `E_ZERO_AMOUNT` if the resulting HLP mint amount rounds to zero
+8. `E_SLIPPAGE` if the resulting HLP mint amount is less than `min_lp_out`
+
+**Behaviour notes:**
+
+- The first-ever deposit into the pool mints HLP at a fixed ratio (USD value scaled from 30 decimals down to 9 LP decimals) — there is no existing supply to price against.
+- Every subsequent deposit mints HLP proportional to `deposit_value_usd / accounted_value_usd × total_lp_supply`.
+- HLP is minted directly to `ctx.sender()` — you cannot deposit on behalf of another address.
+
+**Example (TypeScript):**
+
+```typescript
+import { Transaction } from "@mysten/sui/transactions";
+
+const tx = new Transaction();
+tx.moveCall({
+  target: `${PACKAGE_ID}::hetero_swap_periphery::deposit_liquidity`,
+  typeArguments: [SUI_COIN_TYPE],
+  arguments: [
+    tx.object(POOL_ID),
+    tx.object(SUI_VAULT_ID),
+    tx.object(FEED_ID),
+    tx.object(coinObjectId),
+    tx.pure.u64(minLpOut),
+    tx.object("0x6"),
+  ],
+});
+```
+
+---
+
+### `withdraw_liquidity`
+
+Burns HLP tokens to redeem a proportional share of a specific asset from the pool.
+
+```move
+public entry fun withdraw_liquidity<T>(
+    pool:           &mut Pool,
+    vault:          &mut AssetVault<T>,
+    feed:           &IfaPriceFeed,
+    lp_coin:        Coin<HLP>,
+    min_amount_out: u64,
+    clock:          &Clock,
+    ctx:            &mut TxContext,
+)
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `pool` | `&mut Pool` | The shared pool object |
+| `vault` | `&mut AssetVault<T>` | The vault for the asset you want to withdraw |
+| `feed` | `&IfaPriceFeed` | The oracle feed object |
+| `lp_coin` | `Coin<HLP>` | The HLP tokens being burned — fully consumed |
+| `min_amount_out` | `u64` | Minimum acceptable amount of asset `T` |
+| `clock` | `&Clock` | The Sui system Clock object |
+| `ctx` | `&mut TxContext` | Standard transaction context |
+
+**Verified abort sequence:**
+
+1. `E_POOL_PAUSED` if the pool is paused
+2. `E_ASSET_NOT_WHITELISTED` / `E_ASSET_DISABLED` if `T` isn't whitelisted or is disabled
+3. `E_ZERO_AMOUNT` if `lp_coin` has zero value
+4. `E_LP_SUPPLY_ZERO` if `total_lp_supply` is zero (should never happen if you hold valid HLP)
+5. `E_ORACLE_PRICE_MISSING` / `E_ORACLE_PRICE_STALE` for asset `T`
+6. `E_ZERO_AMOUNT` if the computed output amount rounds to zero
+7. `E_SLIPPAGE` if the output is less than `min_amount_out`
+8. `E_INSUFFICIENT_LIQUIDITY` if `vault` doesn't physically hold enough of asset `T`
+9. `E_WITHDRAW_TOO_LARGE` if the withdrawal exceeds `max_withdraw_bps` of the vault's current balance
+10. `E_MIN_LIQUIDITY` if the withdrawal would drop the vault below its configured floor
+
+<Warning>
+  You choose which asset to receive by which `AssetVault<T>` you pass — not by anything encoded in the HLP token itself. HLP represents pool-wide ownership, not a claim on any specific asset. A withdrawal can fail with `E_INSUFFICIENT_LIQUIDITY` even while you hold valid HLP, if the _specific_ vault you're withdrawing from is thin — even though the pool overall has sufficient value.
+</Warning>
+
+---
+
+## Swap Functions
+
+### `swap_exact_input`
+
+Swaps an exact amount of one asset for another, priced via the oracle's derived pair calculation.
+
+```move
+public entry fun swap_exact_input<TIn, TOut>(
+    pool:                   &mut Pool,
+    vault_in:               &mut AssetVault<TIn>,
+    vault_out:              &mut AssetVault<TOut>,
+    protocol_fee_vault_out: &mut ProtocolFeeVault<TOut>,
+    feed:                   &IfaPriceFeed,
+    coin_in:                Coin<TIn>,
+    min_amount_out:         u64,
+    clock:                  &Clock,
+    ctx:                    &mut TxContext,
+)
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `pool` | `&mut Pool` | The shared pool object |
+| `vault_in` | `&mut AssetVault<TIn>` | Vault for the asset you're sending |
+| `vault_out` | `&mut AssetVault<TOut>` | Vault for the asset you're receiving |
+| `protocol_fee_vault_out` | `&mut ProtocolFeeVault<TOut>` | Fee vault for the output asset |
+| `feed` | `&IfaPriceFeed` | The oracle feed object |
+| `coin_in` | `Coin<TIn>` | The coin being swapped — fully consumed |
+| `min_amount_out` | `u64` | Minimum acceptable amount of `TOut` |
+| `clock` | `&Clock` | The Sui system Clock object |
+| `ctx` | `&mut TxContext` | Standard transaction context |
+
+**Verified abort sequence:**
+
+1. `E_POOL_PAUSED` if the pool is paused
+2. `E_SAME_ASSET` if `TIn` and `TOut` are the same type
+3. `E_ASSET_NOT_WHITELISTED` / `E_ASSET_DISABLED` for either `TIn` or `TOut`
+4. `E_ZERO_AMOUNT` if `coin_in` has zero value
+5. `E_ORACLE_PRICE_STALE` if the **derived pair's** combined timestamp is stale (checked first, via `quote_exact_input_internal`)
+6. `E_SLIPPAGE` if the net output (after both fees) is less than `min_amount_out`
+7. `E_INSUFFICIENT_LIQUIDITY` if `vault_out` doesn't hold enough for `amount_out + protocol_fee`
+8. `E_TRADE_TOO_LARGE` if the raw output exceeds `max_trade_bps` of `vault_out`'s balance
+9. `E_MIN_LIQUIDITY` if the trade would drop `vault_out` below its floor
+10. `E_ORACLE_PRICE_MISSING` / `E_ORACLE_PRICE_STALE` again — re-fetched individually per-asset for USD accounting (in addition to the derived-pair check above)
+
+**Fee mechanics (verified from source):**
+
+The swap computes a `raw_amount_out` from the oracle-derived exchange rate, then deducts two fees from it:
+
+```text
+lp_fee       = raw_amount_out × lp_fee_bps / 10,000
+protocol_fee = raw_amount_out × protocol_fee_bps / 10,000
+amount_out   = raw_amount_out - lp_fee - protocol_fee
+```
+
+The `lp_fee` portion stays in `vault_out` (implicitly benefiting all LPs by not being paid out). The `protocol_fee` portion is physically moved into `protocol_fee_vault_out`.
+
+**Example:**
+
+```move
+// Swap SUI for CNGN
+swap_exact_input<SUI, CNGN>(
+    &mut pool,
+    &mut sui_vault,
+    &mut cngn_vault,
+    &mut cngn_protocol_fee_vault,
+    &feed,
+    sui_coin_in,
+    min_cngn_out,
+    &clock,
+    ctx,
+);
+```
+
+---
+
+### `sweep`
+
+Converts a dust balance of one asset directly into a target asset. This is exposed only in the **periphery** module — `hetero_swap_core` has no separate `sweep` function. It calls `swap_exact_input` internally with renamed type parameters.
+
+```move
+public entry fun sweep<TDust, TTarget>(
+    pool:                      &mut Pool,
+    dust_vault:                &mut AssetVault<TDust>,
+    target_vault:              &mut AssetVault<TTarget>,
+    protocol_fee_vault_target: &mut ProtocolFeeVault<TTarget>,
+    feed:                      &IfaPriceFeed,
+    dust_coin:                 Coin<TDust>,
+    min_target_amount_out:     u64,
+    clock:                     &Clock,
+    ctx:                       &mut TxContext,
+)
+```
+
+**Behaviour:** Identical to `swap_exact_input` in every respect — same abort sequence, same fee mechanics. There is no relaxed validation path for sweep transactions; it is `swap_exact_input` under a different name.
+
+<Info>
+  To sweep multiple dust tokens into one target asset, compose multiple `sweep` calls — one per dust token — within a single Sui Programmable Transaction Block (PTB). Each call independently enforces every check listed for `swap_exact_input`.
+</Info>
+
+---
+
+## Quote Functions (Read-Only)
+
+These simulate the result of an operation without executing it. None mutate state. All still perform the same oracle freshness checks as their state-changing counterparts — a quote can abort with `E_ORACLE_PRICE_STALE` exactly like a real swap would.
+
+### `quote_exact_input`
+
+```move
+public fun quote_exact_input<TIn, TOut>(
+    pool:      &Pool,
+    feed:      &IfaPriceFeed,
+    amount_in: u64,
+    clock:     &Clock,
+): (u64, u64, u64, u64)
+```
+
+**Returns** — verified exact order from source:
+
+| Position | Value | Description |
+| --- | --- | --- |
+| 1st | `raw_amount_out` | Output amount before any fees are deducted |
+| 2nd | `lp_fee` | LP fee amount, in output asset units |
+| 3rd | `protocol_fee` | Protocol fee amount, in output asset units |
+| 4th | `amount_out` | Net output — `raw_amount_out - lp_fee - protocol_fee`. This is what you actually receive. |
+
+**Example:**
+
+```typescript
+const tx = new Transaction();
+tx.moveCall({
+  target: `${PACKAGE_ID}::hetero_swap_periphery::quote_exact_input`,
+  typeArguments: [SUI_COIN_TYPE, CNGN_COIN_TYPE],
+  arguments: [
+    tx.object(POOL_ID),
+    tx.object(FEED_ID),
+    tx.pure.u64(amountIn),
+    tx.object("0x6"),
+  ],
+});
+
+const result = await client.devInspectTransactionBlock({
+  transactionBlock: tx,
+  sender: callerAddress,
+});
+
+// result.results[0].returnValues — four u64 values in the order above
+// returnValues[3] is the amount you should use to set min_amount_out
+// with an appropriate slippage buffer before submitting the real swap
+```
+
+---
+
+### `quote_sweep`
+
+Identical signature, identical internal logic to `quote_exact_input` — provided as a semantically named alias for previewing a sweep operation.
+
+```move
+public fun quote_sweep<TDust, TTarget>(
+    pool:        &Pool,
+    feed:        &IfaPriceFeed,
+    dust_amount: u64,
+    clock:       &Clock,
+): (u64, u64, u64, u64)
+```
+
+Same four-value return order as `quote_exact_input`.
+
+---
+
+### `preview_deposit`
+
+```move
+public fun preview_deposit<T>(
+    pool:   &Pool,
+    feed:   &IfaPriceFeed,
+    amount: u64,
+    clock:  &Clock,
+): u64
+```
+
+**Returns:** A single `u64` — the expected HLP token amount to be minted. Uses the exact same math as `deposit_liquidity`, so this value should match what you actually receive (assuming no price change between the quote and the real transaction).
+
+---
+
+### `preview_withdraw`
+
+```move
+public fun preview_withdraw<T>(
+    pool:      &Pool,
+    feed:      &IfaPriceFeed,
+    lp_amount: u64,
+    clock:     &Clock,
+): u64
+```
+
+**Returns:** A single `u64` — the expected amount of asset `T` you'd receive for burning `lp_amount` of HLP.
+
+<Warning>
+  `preview_withdraw` does **not** check whether the target vault actually holds enough of asset `T` to fulfill the withdrawal, nor does it check `max_withdraw_bps` or `min_liquidity`. It only computes the proportional USD value and converts it to asset `T`. A real `withdraw_liquidity` call with the same inputs can still abort with `E_INSUFFICIENT_LIQUIDITY`, `E_WITHDRAW_TOO_LARGE`, or `E_MIN_LIQUIDITY` even if the preview succeeded.
+</Warning>
+
+---
+
+## Pool and Asset Inspection
+
+### `get_pool_summary`
+
+```move
+public fun get_pool_summary(pool: &Pool): (
+    bool,    // paused
+    u64,     // total_lp_supply
+    u256,    // accounted_value_usd
+    u64,     // lp_fee_bps
+    u64,     // protocol_fee_bps
+    u64,     // max_price_age_ms
+    u64,     // sync_interval_ms
+    address, // protocol_fee_recipient
+    u64,     // number of whitelisted assets (vec_set::length)
+)
+```
+
+**Returns** — verified exact order from source. Note this differs from a naive guess: `total_lp_supply` and `accounted_value_usd` come _before_ the fee fields, not after.
+
+---
+
+### `get_asset_summary`
+
+```move
+public fun get_asset_summary<T>(
+    pool:      &Pool,
+    vault:     &AssetVault<T>,
+    fee_vault: &ProtocolFeeVault<T>,
+): (
+    bool,        // is_whitelisted<T>(pool)
+    AssetConfig, // full per-asset config struct
+    u64,         // vault.balance (raw token amount currently held)
+    u256,        // vault.cached_value_usd (last synced USD value, NOT live)
+    u64,         // vault.last_sync_ms
+    u64,         // fee_vault.balance (accumulated protocol fees, raw token amount)
+)
+```
+
+<Warning>
+  The `u256` value at position 4 is `vault.cached_value_usd` — a **cached** value updated only when `maybe_sync_asset` runs (on deposits, withdrawals, swaps, or an explicit `sync_asset` call, and only if `sync_interval_ms` has elapsed since the last sync). It is not necessarily the vault's live USD value at query time. For an always-current value, compute it yourself from `vault_balance<T>(vault)` and a fresh oracle price.
+</Warning>
+
+---
+
+## Other Read-Only Functions
+
+These are simpler getters also exposed by `hetero_swap_core`, useful for building dashboards without needing the full summary structs.
+
+| Function | Returns | Description |
+| --- | --- | --- |
+| `is_whitelisted<T>(pool)` | `bool` | Whether asset `T` has ever been whitelisted |
+| `is_enabled<T>(pool)` | `bool` | Whether asset `T` is whitelisted **and** currently enabled |
+| `get_asset_config<T>(pool)` | `AssetConfig` | The full config struct for asset `T`. Aborts `E_ASSET_NOT_WHITELISTED` if never whitelisted. |
+| `vault_balance<T>(vault)` | `u64` | Current raw token balance in the vault — always live, not cached |
+| `protocol_fee_balance<T>(fee_vault)` | `u64` | Current accumulated protocol fee balance for asset `T` |
+| `total_lp_supply(pool)` | `u64` | Current total HLP supply |
+| `accounted_value_usd(pool)` | `u256` | Pool-wide accounted USD value, scaled to 30 decimals |
+| `fees(pool)` | `(u64, u64)` | `(lp_fee_bps, protocol_fee_bps)` |
+| `sync_interval_ms(pool)` | `u64` | Current sync interval in milliseconds |
+| `max_price_age_ms(pool)` | `u64` | Current oracle staleness threshold in milliseconds |
+| `cached_value_usd<T>(vault)` | `u256` | The vault's last-synced cached USD value (same caveat as above) |
+| `last_sync_ms<T>(vault)` | `u64` | Timestamp of the vault's last sync |
+
+---
+
+## Admin-Only Functions
+
+These all require the `AdminCap` — held by the IFÁ Labs team. Listed for transparency and so you understand what configuration changes are possible, not because integrators call them.
+
+| Function | Effect |
+| --- | --- |
+| `create_pool` | One-time pool creation. Validates `lp_fee_bps + protocol_fee_bps ≤ 100` (1%). |
+| `create_asset_vault<T>` | Creates an empty `AssetVault<T>` shared object for a new asset |
+| `create_protocol_fee_vault<T>` | Creates an empty `ProtocolFeeVault<T>` shared object |
+| `whitelist_asset<T>` | Registers asset `T` with its oracle index, decimals, target weight, trade/withdraw limits, and minimum liquidity. Aborts `E_ASSET_ALREADY_WHITELISTED` if called twice for the same type. |
+| `set_asset_enabled<T>` | Enables or disables trading for an already-whitelisted asset, without removing its configuration |
+| `set_fees` | Updates `lp_fee_bps` and `protocol_fee_bps`. Same `≤ 100 bps` total validation as pool creation. |
+| `set_max_price_age_ms` | Updates the pool-wide oracle staleness threshold |
+| `set_sync_interval_ms` | Updates how often `maybe_sync_asset` actually re-syncs cached vault values |
+| `pause` / `unpause` | Global kill switch — `pause` sets `E_POOL_PAUSED` to fire on every state-changing call |
+| `collect_protocol_fees<T>` | Sweeps the entire `ProtocolFeeVault<T>` balance to `pool.protocol_fee_recipient` |
+| `sync_asset<T>` | Manually triggers `maybe_sync_asset` for a specific vault, outside the normal deposit/withdraw/swap flow |
+
+<Info>
+  Notice `pause` is a true global switch — there is no per-asset pause. If you need to react to a paused pool in your own integration, check `get_pool_summary().0` (the first return value) before attempting any operation.
+</Info>
+
+---
+
+## Function Quick Reference
+
+| Function | Type | Mutates State | Can Abort On |
+| --- | --- | --- | --- |
+| `deposit_liquidity<T>` | Entry | Yes | Pause, whitelist/disabled, zero amount, stale price, slippage |
+| `withdraw_liquidity<T>` | Entry | Yes | Pause, whitelist/disabled, zero amount, LP supply zero, stale price, slippage, insufficient liquidity, withdraw-too-large, min-liquidity |
+| `swap_exact_input<TIn, TOut>` | Entry | Yes | Pause, same-asset, whitelist/disabled, zero amount, stale price, slippage, insufficient liquidity, trade-too-large, min-liquidity |
+| `sweep<TDust, TTarget>` | Entry | Yes | Identical to `swap_exact_input` |
+| `quote_exact_input<TIn, TOut>` | Read-only | No | Same-asset, zero amount, stale price |
+| `quote_sweep<TDust, TTarget>` | Read-only | No | Same as `quote_exact_input` |
+| `preview_deposit<T>` | Read-only | No | Zero amount, stale price |
+| `preview_withdraw<T>` | Read-only | No | Zero amount, LP supply zero, stale price |
+| `get_pool_summary` | Read-only | No | Never |
+| `get_asset_summary<T>` | Read-only | No | Asset not whitelisted |
+| `is_whitelisted<T>` / `is_enabled<T>` | Read-only | No | Never |
+| `vault_balance<T>` / `protocol_fee_balance<T>` | Read-only | No | Never |
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Sui Swap Contract Overview" icon="right-left" href="/sui-swap-overview">
+    Architecture, core concepts, and what's deployed on testnet.
+  </Card>
+
+  <Card title="Swap Contract Addresses" icon="file-contract" href="/sui-swap-contract-addresses">
+    Package ID, Pool ID, AdminCap, and every asset vault on Sui Testnet.
+  </Card>
+</CardGroup>
+
+<CardGroup cols={2}>
+  <Card title="Sui Function Reference" icon="code" href="/sui-function-reference">
+    The underlying oracle functions this contract consumes.
+  </Card>
+
+  <Card title="Testnet Faucet" icon="faucet" href="/testnet-faucet">
+    Claim testnet tokens to try deposits and swaps yourself.
+  </Card>
+</CardGroup>

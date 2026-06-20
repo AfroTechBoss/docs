@@ -14,14 +14,14 @@ IFÁ Labs is designed as a multi-chain oracle network from day one — not a sin
 | **Base Mainnet** | EVM L2 — Production | `0xA9F17344689C2c2328F94464998db1d3e35B80dC` | [View on Basescan](https://basescan.org/address/0xA9F17344689C2c2328F94464998db1d3e35B80dC) |
 | **Base Sepolia** | EVM L2 — Testnet | `0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b` | [View on Basescan Sepolia](https://sepolia.basescan.org/address/0xbF2ae81D8Adf3AA22401C4cC4f0116E936e1025b) |
 | **AssetChain Testnet** | EVM — Testnet | `0xBAc31e568883774A632275F9c8E7A5Bd117000F7` | [View on AssetChain Explorer](https://scan-testnet.assetchain.org/address/0xBAc31e568883774A632275F9c8E7A5Bd117000F7) |
-| **Sui Testnet** | Sui Move — Testnet | `0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f` | [View on Suiscan](https://suiscan.xyz/testnet/object/0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f) |
+| **Sui Testnet** | Sui Move — Testnet | `0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a` | [View on Suiscan](https://suiscan.xyz/testnet/object/0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a) |
 
 <Info>
   Base Mainnet is the primary production deployment. If you're building for production, start here. Use Base Sepolia for all EVM testing and development before going live.
 </Info>
 
 <Note>
-  The Sui Testnet entry shows the **Package ID**. On Sui, you interact with the **Feed Object** (`0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a`) when reading prices — not the package directly. See the [Sui Integration Guide](/sui-read-latest-price) for details.
+  The Sui Testnet entry shows the **Package ID**. On Sui, you interact with the **Feed Object** (`0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0`) when reading prices — not the package directly. See the [Sui Integration Guide](/sui-read-latest-price) for details.
 </Note>
 
 ---
@@ -56,7 +56,13 @@ Key differences from EVM deployments:
 - **Built-in freshness helper.** The Sui contract exposes `price_feed::is_fresh(price_feed, current_time, max_age)` directly — developers do not need to implement this check themselves.
 - **Asset IDs as `vector<u8>`.** The same 32-byte asset ID values are used across all networks, but on Sui they are passed as `vector<u8>` rather than `bytes32` hex strings.
 
+Beyond the oracle itself, Sui is also home to the **IFÁ Labs Swap Contract** — a live heterogeneous liquidity pool on Sui Testnet that uses the oracle directly for pricing. See [Sui Swap Contract](/sui-swap-overview) for details.
+
 Sui Mainnet deployment is planned once testnet integration is validated by the ecosystem.
+
+<Warning>
+  The Sui oracle package was redeployed after this page was first published. If you have any previously documented object IDs cached, refresh them from [Network Information](/network-information) or [Contract Addresses](/contract-addresses) before integrating.
+</Warning>
 
 ---
 
@@ -68,7 +74,7 @@ Sui Mainnet deployment is planned once testnet integration is validated by the e
 | **AssetChain Mainnet** | TBD | Full production deployment for RWA-focused protocols |
 | **Solana** | TBD | Native Solana program with dedicated interface — different from EVM and Sui contracts |
 | **Additional EVM L2s** | TBD | Optimism, Arbitrum, Polygon zkEVM, and others based on ecosystem demand |
-| **Sui Swap Contract** | TBD | Heterogeneous liquidity pool on Sui powered by IFÁ Labs price feeds |
+| **Sui Swap Mainnet** | TBD | Production deployment of the heterogeneous liquidity pool following testnet validation |
 | **Cross-Chain Messaging** | H2 2026 | Unified price propagation via LayerZero or Wormhole for instant cross-chain synchronization |
 | **Global View Contracts** | H2 2026 | Single-query endpoints returning consistent prices regardless of chain |
 
@@ -119,7 +125,7 @@ Reach out via [support@ifalabs.com](mailto:support@ifalabs.com) or open a reques
     Full network reference including RPC endpoints, object IDs, and faucet links.
   </Card>
 
-  <Card title="Cross-Chain Price Consistency" icon="link" href="/cross-chain-price-consistency">
-    Deep dive into how IFÁ Labs maintains pricing consistency across chains.
+  <Card title="Sui Swap Contract" icon="right-left" href="/sui-swap-overview">
+    Explore the live heterogeneous liquidity pool built on the IFÁ Labs Sui oracle.
   </Card>
 </CardGroup>

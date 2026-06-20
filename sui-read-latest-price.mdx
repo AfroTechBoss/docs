@@ -7,6 +7,10 @@ This page covers how to read price feeds from the IFÁ Labs oracle on Sui Testne
 
 If you are building on Base Mainnet or another EVM chain, see [Read Latest Price](/read-latest-price) for the Solidity integration guide.
 
+<Warning>
+  The oracle package was recently redeployed — all object IDs on this page were updated. If you have older IDs saved anywhere in your code, replace them now.
+</Warning>
+
 ---
 
 ## Key Differences from EVM
@@ -31,9 +35,9 @@ You need these three values before integrating:
 
 | Object | ID |
 | --- | --- |
-| **Package ID** | `0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f` |
-| **Feed Object ID** | `0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a` |
-| **Verifier Object ID** | `0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5` |
+| **Package ID** | `0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a` |
+| **Feed Object ID** | `0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0` |
+| **Verifier Object ID** | `0x028e5df554ac7d253a132c60bcd13cf32bea9eb8c81d04d685c2a31299fbe43b` |
 
 <Warning>
   Always pass the **Feed Object ID** when reading prices — not the Package ID. The Package ID is only used when importing `ifa_oracle` as a dependency in your own Move package.
@@ -212,8 +216,8 @@ import { Transaction }               from "@mysten/sui/transactions";
 const client = new SuiClient({ url: getFullnodeUrl("testnet") });
 
 const IFA = {
-  packageId: "0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f",
-  feedId:    "0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a",
+  packageId: "0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a",
+  feedId:    "0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0",
 } as const;
 ```
 
@@ -283,8 +287,8 @@ import { bcs }                       from "@mysten/sui/bcs";
 const client = new SuiClient({ url: getFullnodeUrl("testnet") });
 
 const IFA = {
-  packageId: "0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f",
-  feedId:    "0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a",
+  packageId: "0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a",
+  feedId:    "0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0",
 } as const;
 
 // BCS schema matching the Move PriceFeed struct
@@ -364,11 +368,11 @@ sui client switch --env testnet
 
 # Read USDT/USD price
 sui client call \
-  --package 0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f \
+  --package 0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a \
   --module price_feed \
   --function get_asset_info \
   --args \
-    0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a \
+    0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0 \
     "[6,202,12,239,97,7,38,63,59,9,165,20,72,97,123,101,146,120,207,247,68,240,231,2,194,36,162,248,140,145,229,13]" \
   --gas-budget 10000000
 ```
@@ -428,6 +432,12 @@ use ifa_oracle::bytes32;
 
 ---
 
+## Want to Build a Swap or Liquidity Pool Instead?
+
+If you're trying to build a price-aware swap, dust sweeper, or liquidity pool — IFÁ Labs already has a live one on Sui Testnet you can model from or integrate directly with. See [Sui Swap Contract](/sui-swap-overview) for the periphery functions (`deposit_liquidity`, `swap_exact_input`, `sweep`, and more) and how they consume this same `IfaPriceFeed`.
+
+---
+
 ## Getting Testnet Tokens
 
 You need testnet SUI to deploy contracts on Sui Testnet. Price reads via `devInspectTransactionBlock` are free and require no tokens.
@@ -444,8 +454,8 @@ You need testnet SUI to deploy contracts on Sui Testnet. Price reads via `devIns
     Complete reference for every public function in the IFÁ Labs Sui Move contracts.
   </Card>
 
-  <Card title="Testnet Faucet" icon="faucet" href="/testnet-faucet">
-    Claim testnet SUI and WAL tokens for development.
+  <Card title="Sui Swap Contract" icon="right-left" href="/sui-swap-overview">
+    See the oracle in action inside a live liquidity pool.
   </Card>
 </CardGroup>
 

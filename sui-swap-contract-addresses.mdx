@@ -1,0 +1,240 @@
+---
+title: "Swap Contract Addresses"
+description: "Package ID, Pool ID, AdminCap, and every asset vault for the IFÁ Labs Swap Contract on Sui Testnet — with verification guidance and TypeScript constants."
+---
+
+This page is the authoritative reference for every deployed object in the IFÁ Labs Swap Contract on Sui Testnet. Unlike the oracle, which has just three objects, the swap contract has one object per asset — a vault and a protocol fee vault for each supported token, plus the shared `Pool` and several capability objects.
+
+---
+
+## Core Objects
+
+| Object | ID |
+| --- | --- |
+| **Package ID** | `0x765c26edd8a46750c017281c249cece13e7d6a2581698777ab9c804175b20f4b` |
+| **Pool ID** | `0x905157cac184db49923b54c8baeeed6d03fcfca2bde2a89ac120c81c47666b6d` |
+| **AdminCap ID** | `0x9e022992fa149edfd33978e50c87037dbfcb8292f655a6b7cc28801fc206caf8` |
+| **HLP Treasury Cap ID** | `0xf13db564315b09bbee997915e7c2b3d218a7118466871933f7550178eee62b3f` |
+| **HLP Metadata Cap ID** | `0xa2e31bcbed80a5f0225f6f883c8b6a8bc07fda94ac910d95933814e493cc8f92` |
+
+<Info>
+  **`AdminCap`**, **HLP Treasury Cap**, and **HLP Metadata Cap** are owned objects held by the IFÁ Labs team — not objects you pass into deposit, withdraw, swap, or sweep calls. They're listed here for completeness and transparency, not because integrators need them. The **Pool ID** is the object you'll actually pass into every periphery function.
+</Info>
+
+---
+
+## Pool Configuration
+
+| Parameter | Value |
+| --- | --- |
+| **LP Fee** | 30 bps (0.30%) |
+| **Protocol Fee** | 10 bps (0.10%) |
+| **Max Price Age** | 3,600,000 ms (1 hour) |
+| **Sync Interval** | 600,000 ms (10 minutes) |
+| **Protocol Fee Recipient** | `0x549182227b60dc5e499d77df18f2608991ca3440f7cd848bb5206885596dd315` |
+| **Paused** | `false` |
+
+---
+
+## Asset Vaults
+
+Each supported asset has its own `AssetVault<T>` and `ProtocolFeeVault<T>` — both required as arguments whenever you deposit, withdraw, or swap that asset.
+
+### SUI
+
+| Object | ID |
+| --- | --- |
+| **Coin Type** | `0x2::sui::SUI` |
+| **Asset Vault ID** | `0xcc4404aaef9fd5b33890e3249bbaf41045c63f7f9fc1c390dc375eec54e7331d` |
+| **Protocol Fee Vault ID** | `0x019ff372771260fe057bd91569ee7a72914fa1675f9a605d86b8efa767d8ce15` |
+| **Asset Index** | `0xd57f164423e2cda5609280f00a447a518e3dd6877cb4e3b44f30d1c75ac1fa27` |
+| **Coin Decimals** | 9 |
+| **Target Weight** | 4,000 bps (40%) |
+| **Status** | Enabled |
+
+### USDSUI
+
+| Object | ID |
+| --- | --- |
+| **Coin Type** | `0x03d89b35c658a0b0359b35fd83fc5c44949af781e376125d382eed9142aefe6d::usdsui::USDSUI` |
+| **Asset Vault ID** | `0xebd902f3725acfe43e8abc31300e306c782198c0d3978f5a3ca8417355dfa706` |
+| **Protocol Fee Vault ID** | `0x533a2d45e9a6ebf8b352004207bae4851a63ee656b09f9c046f15a9d53a82cbc` |
+| **Asset Index** | `0xf184c9079687c0c05097f861cd229697c610d4443712d900f162ef5b605d8bb9` |
+| **Coin Decimals** | 9 |
+| **Target Weight** | 4,000 bps (40%) |
+| **Status** | Enabled |
+
+### CNGN
+
+| Object | ID |
+| --- | --- |
+| **Coin Type** | `0x03d89b35c658a0b0359b35fd83fc5c44949af781e376125d382eed9142aefe6d::cngn::CNGN` |
+| **Asset Vault ID** | `0x5fb56bd1d5162af2ce67f06a969dad0df60ff8c628af429efe2ff5e2aceebcd0` |
+| **Protocol Fee Vault ID** | `0xac6819647ff6c9773bfef4ac34569f3ed43e359f7fa36dffaf3f861221e1a9b3` |
+| **Asset Index** | `0x83a18c73cf75a028a24b79cbedb3b8d8ba363b748a3210ddbcaa95eec3b87b3a` |
+| **Coin Decimals** | 6 |
+| **Target Weight** | 4,000 bps (40%) |
+| **Status** | Enabled |
+
+<Note>
+  This Asset Index matches the CNGN/USD asset ID used on the oracle directly — confirming the swap contract reads the exact same `IfaPriceFeed` entries documented on [Supported Assets](/supported-assets).
+</Note>
+
+### ZARP
+
+| Object | ID |
+| --- | --- |
+| **Coin Type** | `0x03d89b35c658a0b0359b35fd83fc5c44949af781e376125d382eed9142aefe6d::zarp::ZARP` |
+| **Asset Vault ID** | `0xcefba8afe12d87aa206a8988629fdd91deec4f89ff484c628af8a50785986bec` |
+| **Protocol Fee Vault ID** | `0x44c76eb9786a73eaf895a516d6d96544acb1f8c78cc729d60f2e4f7ad0624e8c` |
+| **Asset Index** | `0x12373a3b1c4827c84bf6d7b11df100442695d0abfdb7a20d30a41d67d58e75a8` |
+| **Coin Decimals** | 6 |
+| **Target Weight** | 4,000 bps (40%) |
+| **Status** | Enabled |
+
+### WAL
+
+| Object | ID |
+| --- | --- |
+| **Coin Type** | `0x03d89b35c658a0b0359b35fd83fc5c44949af781e376125d382eed9142aefe6d::wal::WAL` |
+| **Asset Vault ID** | Not yet created |
+| **Protocol Fee Vault ID** | Not yet created |
+| **Status** | Listed, not whitelisted |
+
+<Warning>
+  WAL's coin type is registered in the deployment config but no `AssetVault<WAL>` or `ProtocolFeeVault<WAL>` has been created on-chain yet. Attempting to deposit, withdraw, or swap WAL will fail — there is no vault object to pass. Do not build against WAL until this page is updated to show real vault IDs.
+</Warning>
+
+---
+
+## TypeScript Constants
+
+Copy-paste ready object IDs and coin types for the live Sui Testnet deployment:
+
+```typescript
+export const IFA_SWAP_TESTNET = {
+  packageId:        "0x765c26edd8a46750c017281c249cece13e7d6a2581698777ab9c804175b20f4b",
+  poolId:           "0x905157cac184db49923b54c8baeeed6d03fcfca2bde2a89ac120c81c47666b6d",
+} as const;
+
+export const IFA_SWAP_ASSETS = {
+  SUI: {
+    coinType:           "0x2::sui::SUI",
+    assetVaultId:       "0xcc4404aaef9fd5b33890e3249bbaf41045c63f7f9fc1c390dc375eec54e7331d",
+    protocolFeeVaultId: "0x019ff372771260fe057bd91569ee7a72914fa1675f9a605d86b8efa767d8ce15",
+    coinDecimals:       9,
+  },
+  USDSUI: {
+    coinType:           "0x03d89b35c658a0b0359b35fd83fc5c44949af781e376125d382eed9142aefe6d::usdsui::USDSUI",
+    assetVaultId:       "0xebd902f3725acfe43e8abc31300e306c782198c0d3978f5a3ca8417355dfa706",
+    protocolFeeVaultId: "0x533a2d45e9a6ebf8b352004207bae4851a63ee656b09f9c046f15a9d53a82cbc",
+    coinDecimals:       9,
+  },
+  CNGN: {
+    coinType:           "0x03d89b35c658a0b0359b35fd83fc5c44949af781e376125d382eed9142aefe6d::cngn::CNGN",
+    assetVaultId:       "0x5fb56bd1d5162af2ce67f06a969dad0df60ff8c628af429efe2ff5e2aceebcd0",
+    protocolFeeVaultId: "0xac6819647ff6c9773bfef4ac34569f3ed43e359f7fa36dffaf3f861221e1a9b3",
+    coinDecimals:       6,
+  },
+  ZARP: {
+    coinType:           "0x03d89b35c658a0b0359b35fd83fc5c44949af781e376125d382eed9142aefe6d::zarp::ZARP",
+    assetVaultId:       "0xcefba8afe12d87aa206a8988629fdd91deec4f89ff484c628af8a50785986bec",
+    protocolFeeVaultId: "0x44c76eb9786a73eaf895a516d6d96544acb1f8c78cc729d60f2e4f7ad0624e8c",
+    coinDecimals:       6,
+  },
+  // WAL intentionally omitted — no vault deployed yet
+} as const;
+
+// The Sui system Clock object — required by every swap function, same address on every network
+export const SUI_CLOCK_ID = "0x6";
+```
+
+---
+
+## Using These IDs in a Transaction
+
+A complete swap example — SUI for CNGN — using the real testnet IDs above:
+
+```typescript
+import { Transaction } from "@mysten/sui/transactions";
+import { IFA_SWAP_TESTNET, IFA_SWAP_ASSETS, SUI_CLOCK_ID } from "./constants";
+
+const IFA_ORACLE_FEED_ID = "0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0";
+
+const tx = new Transaction();
+
+tx.moveCall({
+  target: `${IFA_SWAP_TESTNET.packageId}::hetero_swap_periphery::swap_exact_input`,
+  typeArguments: [
+    IFA_SWAP_ASSETS.SUI.coinType,
+    IFA_SWAP_ASSETS.CNGN.coinType,
+  ],
+  arguments: [
+    tx.object(IFA_SWAP_TESTNET.poolId),
+    tx.object(IFA_SWAP_ASSETS.SUI.assetVaultId),
+    tx.object(IFA_SWAP_ASSETS.CNGN.assetVaultId),
+    tx.object(IFA_SWAP_ASSETS.CNGN.protocolFeeVaultId),
+    tx.object(IFA_ORACLE_FEED_ID),
+    tx.object(suiCoinObjectId), // your Coin<SUI> object
+    tx.pure.u64(minCngnOut),
+    tx.object(SUI_CLOCK_ID),
+  ],
+});
+```
+
+<Info>
+  Notice the swap contract requires **both** its own Pool/Vault objects **and** the oracle's Feed Object ID in the same call. This is the swap contract directly consuming the oracle — exactly as described in the [Sui Swap Contract Overview](/sui-swap-overview).
+</Info>
+
+---
+
+## Verifying These Objects On-Chain
+
+<Steps>
+  <Step title="Open the package on Suiscan">
+    Navigate to the [Package ID on Suiscan](https://suiscan.xyz/testnet/object/0x765c26edd8a46750c017281c249cece13e7d6a2581698777ab9c804175b20f4b). Confirm the package name is `ifalabs` and the modules listed include `hetero_swap_core`, `hetero_swap_periphery`, and `hlp`.
+  </Step>
+  <Step title="Verify the Pool object">
+    Navigate to the [Pool ID on Suiscan](https://suiscan.xyz/testnet/object/0x905157cac184db49923b54c8baeeed6d03fcfca2bde2a89ac120c81c47666b6d). Confirm the object type is `ifalabs::hetero_swap_core::Pool` and it is a shared object.
+  </Step>
+  <Step title="Verify an asset vault">
+    Pick any asset vault ID from the tables above and confirm its object type matches `ifalabs::hetero_swap_core::AssetVault<T>`, where `T` is the expected coin type.
+  </Step>
+  <Step title="Check recent transactions">
+    On the Pool object page, review recent transactions. You should see `deposit_liquidity`, `swap_exact_input`, or `withdraw_liquidity` calls if the pool has seen any testnet activity.
+  </Step>
+</Steps>
+
+---
+
+## Reporting an Address Discrepancy
+
+If you encounter an object ID claiming to be part of the IFÁ Labs Swap Contract that is not listed on this page, do not use it and report it immediately:
+
+- **Email:** [support@ifalabs.com](mailto:support@ifalabs.com)
+- **Telegram:** [t.me/ifalabs](https://t.me/ifalabs)
+- **GitHub:** [IFA-Labs/swap\_contract\_sui/issues](https://github.com/IFA-Labs/swap_contract_sui/issues)
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Swap Function Reference" icon="code" href="/sui-swap-function-reference">
+    Every public function — deposit, withdraw, swap, sweep, and quote.
+  </Card>
+
+  <Card title="Sui Swap Contract Overview" icon="right-left" href="/sui-swap-overview">
+    Architecture, core concepts, and what the pool does.
+  </Card>
+</CardGroup>
+
+<CardGroup cols={2}>
+  <Card title="Contract Addresses" icon="file-contract" href="/contract-addresses">
+    The oracle's object IDs — required alongside the Pool ID for every swap call.
+  </Card>
+
+  <Card title="Testnet Faucet" icon="faucet" href="/testnet-faucet">
+    Claim testnet SUI and WAL to try a deposit or swap yourself.
+  </Card>
+</CardGroup>

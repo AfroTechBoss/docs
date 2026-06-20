@@ -70,6 +70,12 @@ Answers to the questions developers and protocol teams ask most often. If your q
 
     The only cost is standard network gas if you deploy your own contract that consumes IFÁ Labs feeds and writes data to your own contract's storage.
   </Accordion>
+
+  <Accordion title="Is there a way to swap stablecoins using IFÁ Labs?">
+    Yes. The **IFÁ Labs Swap Contract** is a live heterogeneous liquidity pool on Sui Testnet that uses the oracle directly for pricing — supporting deposits, withdrawals, swaps, and dust sweeping across SUI, CNGN, ZARP, and other listed assets.
+
+    See [Sui Swap Contract](/sui-swap-overview) for the full overview and integration guide.
+  </Accordion>
 </AccordionGroup>
 
 ---
@@ -124,7 +130,7 @@ Answers to the questions developers and protocol teams ask most often. If your q
         }
     ```
 
-    The Feed Object ID on Sui Testnet is `0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a`. Pass it as the `feed` argument in your transaction. See the [Sui Integration Guide](/sui-read-latest-price) for full examples.
+    The Feed Object ID on Sui Testnet is `0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0`. Pass it as the `feed` argument in your transaction. See the [Sui Integration Guide](/sui-read-latest-price) for full examples.
   </Accordion>
 
   <Accordion title="What are asset IDs and how are they generated?">
@@ -286,7 +292,7 @@ Answers to the questions developers and protocol teams ask most often. If your q
 
     The full audit summary is at [AdForensics Audit Summary](/adforensics-audit-summary). The complete report is available on request from [support@ifalabs.com](mailto:support@ifalabs.com) and in the [GitHub repository](https://github.com/IFA-Labs/oracle_contract).
 
-    The Sui Move contracts are currently on testnet. A formal audit will be completed before Sui Mainnet deployment.
+    The Sui Move contracts (oracle and swap) are currently on testnet. A formal audit will be completed before either reaches mainnet.
   </Accordion>
 
   <Accordion title="Can IFÁ Labs modify or pause price feeds?">
@@ -456,11 +462,23 @@ Answers to the questions developers and protocol teams ask most often. If your q
   <Accordion title="What are the Sui Testnet object IDs?">
     | Object | ID |
     | --- | --- |
-    | **Package ID** | `0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f` |
-    | **Feed Object ID** | `0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a` |
-    | **Verifier Object ID** | `0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5` |
+    | **Package ID** | `0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a` |
+    | **Feed Object ID** | `0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0` |
+    | **Verifier Object ID** | `0x028e5df554ac7d253a132c60bcd13cf32bea9eb8c81d04d685c2a31299fbe43b` |
 
-    When reading prices, pass the **Feed Object ID**. The Package ID is only needed when importing `ifa_oracle` as a dependency in your own Move package. See [Contract Addresses](/contract-addresses) for the full reference.
+    When reading prices, pass the **Feed Object ID**. The Package ID is only needed when importing `ifa_oracle` as a dependency in your own Move package.
+
+    <Warning>
+      These object IDs were updated after a redeployment of the oracle package. If you previously saved different IDs, they are now stale — always cross-check against [Contract Addresses](/contract-addresses) before integrating.
+    </Warning>
+
+    See [Contract Addresses](/contract-addresses) for the full reference.
+  </Accordion>
+
+  <Accordion title="Is there a swap contract on Sui?">
+    Yes. The **IFÁ Labs Swap Contract** is a live heterogeneous liquidity pool deployed on Sui Testnet, priced directly by the IFÁ Labs oracle. It supports liquidity deposits and withdrawals, asset-to-asset swaps, and dust sweeping into a target asset across SUI, CNGN, ZARP, and other listed tokens.
+
+    See [Sui Swap Contract](/sui-swap-overview) for the full overview, pool details, and integration guide.
   </Accordion>
 </AccordionGroup>
 

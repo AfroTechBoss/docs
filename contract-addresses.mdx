@@ -41,13 +41,17 @@ On Sui, IFÁ Labs is deployed as a native Move package. There are three object I
 
 | Object | ID | Description |
 | --- | --- | --- |
-| **Package ID** | `0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f` | The published Move package. Used when importing the module in your own Move contracts. |
-| **Feed Object ID** | `0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a` | The shared `IfaPriceFeed` object. Pass this when reading prices. |
-| **Verifier Object ID** | `0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5` | The shared `IfaPriceFeedVerifier` object. Used by the relayer to submit price updates. |
+| **Package ID** | `0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a` | The published Move package. Used when importing the module in your own Move contracts. |
+| **Feed Object ID** | `0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0` | The shared `IfaPriceFeed` object. Pass this when reading prices. |
+| **Verifier Object ID** | `0x028e5df554ac7d253a132c60bcd13cf32bea9eb8c81d04d685c2a31299fbe43b` | The shared `IfaPriceFeedVerifier` object. Used by the relayer to submit price updates. |
 
 | Network | Status | Explorer |
 | --- | --- | --- |
-| **Sui Testnet** | Testnet | [View package on Suiscan](https://suiscan.xyz/testnet/object/0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f) |
+| **Sui Testnet** | Testnet | [View package on Suiscan](https://suiscan.xyz/testnet/object/0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a) |
+
+<Warning>
+  **Redeployed contract.** These object IDs were updated following a fresh deployment of the oracle package. If you have any of the previous IDs hardcoded or cached, they now point to a stale package and must be replaced.
+</Warning>
 
 <Info>
   When reading prices on Sui, always pass the **Feed Object ID** — not the Package ID. The Package ID is only needed when referencing the module as a dependency in your own Move package's `Move.toml`.
@@ -80,9 +84,9 @@ const client = new SuiClient({ url: getFullnodeUrl("testnet") });
 
 // These are the object IDs you pass in transactions
 const IFA_SUI_TESTNET = {
-  packageId:  "0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f",
-  feedId:     "0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a",
-  verifierId: "0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5",
+  packageId:  "0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a",
+  feedId:     "0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0",
+  verifierId: "0x028e5df554ac7d253a132c60bcd13cf32bea9eb8c81d04d685c2a31299fbe43b",
 } as const;
 
 // Read a price via a devInspect transaction
@@ -233,10 +237,10 @@ Before using any Sui object ID, verify it on Suiscan:
 
 <Steps>
   <Step title="Open the package on Suiscan">
-    Navigate to the [Package ID on Suiscan](https://suiscan.xyz/testnet/object/0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f). Confirm the package name is `ifa_oracle` and the modules listed include `price_feed`, `verifier`, and `bytes32`.
+    Navigate to the [Package ID on Suiscan](https://suiscan.xyz/testnet/object/0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a). Confirm the package name is `ifa_oracle` and the modules listed include `price_feed`, `verifier`, and `bytes32`.
   </Step>
   <Step title="Verify the Feed Object">
-    Navigate to the [Feed Object ID on Suiscan](https://suiscan.xyz/testnet/object/0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a). Confirm the object type is `ifa_oracle::price_feed::IfaPriceFeed` and it is a shared object.
+    Navigate to the [Feed Object ID on Suiscan](https://suiscan.xyz/testnet/object/0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0). Confirm the object type is `ifa_oracle::price_feed::IfaPriceFeed` and it is a shared object.
   </Step>
   <Step title="Check recent transactions">
     On the Feed Object page, review recent transactions. You should see `submit_price_feed` calls from the relayer — confirming the oracle is actively updating prices.
@@ -264,9 +268,9 @@ Before using any Sui object ID, verify it on Suiscan:
 | --- | --- |
 | **Network** | Sui Testnet |
 | **Explorer** | [suiscan.xyz/testnet](https://suiscan.xyz/testnet) |
-| **Package ID** | `0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f` |
-| **Feed Object ID** | `0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a` |
-| **Verifier Object ID** | `0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5` |
+| **Package ID** | `0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a` |
+| **Feed Object ID** | `0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0` |
+| **Verifier Object ID** | `0x028e5df554ac7d253a132c60bcd13cf32bea9eb8c81d04d685c2a31299fbe43b` |
 | **Faucet** | [faucet.sui.io](https://faucet.sui.io) |
 
 ---

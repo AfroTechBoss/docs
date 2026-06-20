@@ -75,12 +75,16 @@ IFÁ Labs oracle deployed as a native Sui Move package. The interface is differe
 | **Network Name** | Sui Testnet |
 | **Network Type** | Non-EVM — Sui Move |
 | **Explorer** | [suiscan.xyz/testnet](https://suiscan.xyz/testnet) |
-| **Package ID** | `0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f` |
-| **Feed Object ID** | `0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a` |
-| **Verifier Object ID** | `0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5` |
-| **Package on Explorer** | [View package](https://suiscan.xyz/testnet/object/0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f) |
+| **Package ID** | `0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a` |
+| **Feed Object ID** | `0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0` |
+| **Verifier Object ID** | `0x028e5df554ac7d253a132c60bcd13cf32bea9eb8c81d04d685c2a31299fbe43b` |
+| **Package on Explorer** | [View package](https://suiscan.xyz/testnet/object/0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a) |
 | **Faucet** | [faucet.sui.io](https://faucet.sui.io) |
 | **Status** | Testnet |
+
+<Warning>
+  These object IDs were updated following a contract redeployment. If you have older IDs cached anywhere in your code, update them now — the previous deployment is stale.
+</Warning>
 
 <Info>
   On Sui, you interact with the **Feed Object** (`IfaPriceFeed`) to read prices — not the Package ID directly. The Package ID is only needed when importing the module in your own Move contracts. Pass the Feed Object ID when calling `get_asset_info` and related functions.
@@ -124,29 +128,29 @@ The fastest method. Visit [chainlist.org](https://chainlist.org), search for "Ba
     In MetaMask → Settings → Networks → Add Network → Add a network manually:
 
     ```text
-        Network Name:    Base
-        RPC URL:         https://mainnet.base.org
-        Chain ID:        8453
-        Currency Symbol: ETH
-        Block Explorer:  https://basescan.org
+            Network Name:    Base
+            RPC URL:         https://mainnet.base.org
+            Chain ID:        8453
+            Currency Symbol: ETH
+            Block Explorer:  https://basescan.org
     ```
   </Tab>
   <Tab title="Base Sepolia">
     ```text
-        Network Name:    Base Sepolia
-        RPC URL:         https://sepolia.base.org
-        Chain ID:        84532
-        Currency Symbol: ETH
-        Block Explorer:  https://sepolia.basescan.org
+            Network Name:    Base Sepolia
+            RPC URL:         https://sepolia.base.org
+            Chain ID:        84532
+            Currency Symbol: ETH
+            Block Explorer:  https://sepolia.basescan.org
     ```
   </Tab>
   <Tab title="AssetChain Testnet">
     ```text
-        Network Name:    AssetChain Testnet
-        RPC URL:         https://enugu-rpc.assetchain.org
-        Chain ID:        42421
-        Currency Symbol: XRP
-        Block Explorer:  https://scan-testnet.assetchain.org
+            Network Name:    AssetChain Testnet
+            RPC URL:         https://enugu-rpc.assetchain.org
+            Chain ID:        42421
+            Currency Symbol: XRP
+            Block Explorer:  https://scan-testnet.assetchain.org
     ```
   </Tab>
 </Tabs>
@@ -297,9 +301,9 @@ const suiTestnetClient = new SuiClient({
 
 // IFÁ Labs Sui Testnet object IDs
 const IFA_SUI_TESTNET = {
-  packageId:  "0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f",
-  feedId:     "0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a",
-  verifierId: "0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5",
+  packageId:  "0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a",
+  feedId:     "0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0",
+  verifierId: "0x028e5df554ac7d253a132c60bcd13cf32bea9eb8c81d04d685c2a31299fbe43b",
 } as const;
 ```
 
@@ -329,12 +333,12 @@ export const IFA_CHAIN_IDS = {
   "assetchain-testnet": 42421,
 } as const;
 
-// Sui Testnet — shared object IDs
+// Sui Testnet — shared object IDs (updated after redeployment)
 export const IFA_SUI_OBJECTS = {
   "sui-testnet": {
-    packageId:  "0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f",
-    feedId:     "0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a",
-    verifierId: "0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5",
+    packageId:  "0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a",
+    feedId:     "0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0",
+    verifierId: "0x028e5df554ac7d253a132c60bcd13cf32bea9eb8c81d04d685c2a31299fbe43b",
   },
 } as const;
 ```
@@ -406,9 +410,9 @@ ASSETCHAIN TESTNET (Testnet — EVM)
   Explorer:  https://scan-testnet.assetchain.org
 
 SUI TESTNET (Testnet — Sui Move)
-  Package:   0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f
-  Feed ID:   0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a
-  Verifier:  0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5
+  Package:   0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a
+  Feed ID:   0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0
+  Verifier:  0x028e5df554ac7d253a132c60bcd13cf32bea9eb8c81d04d685c2a31299fbe43b
   Explorer:  https://suiscan.xyz/testnet
   Faucet:    https://faucet.sui.io
 

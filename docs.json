@@ -52,6 +52,14 @@
             ]
           },
           {
+            "group": "Sui Swap Contract",
+            "pages": [
+              "sui-swap-overview",
+              "sui-swap-function-reference",
+              "sui-swap-contract-addresses"
+            ]
+          },
+          {
             "group": "MCP Server (new)",
             "pages": [
               "what-is-the-ifa-labs-mcp-server",

@@ -21,6 +21,10 @@ The IFÁ Labs Sui oracle package (`ifa_oracle`) contains three modules:
 
 Consumers only need `price_feed` and `bytes32`. The `verifier` module is used by the IFÁ Labs relayer infrastructure — not by protocol integrators.
 
+<Info>
+  Looking for a real example of these functions in production? The [Sui Swap Contract](/sui-swap-overview) consumes `get_asset_info` and `get_pair_by_id` directly for pricing every deposit, withdrawal, and swap.
+</Info>
+
 ---
 
 ## Data Types
@@ -568,8 +572,8 @@ let pairs = price_feed::get_pairs_by_id(feed, assets0, assets1, directions);
     Full integration examples using Move and the Sui TypeScript SDK.
   </Card>
 
-  <Card title="Testnet Faucet" icon="faucet" href="/testnet-faucet">
-    Claim testnet SUI and WAL tokens for development.
+  <Card title="Sui Swap Contract" icon="right-left" href="/sui-swap-overview">
+    See these exact functions used in a live liquidity pool.
   </Card>
 </CardGroup>
 

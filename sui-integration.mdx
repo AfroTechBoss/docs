@@ -9,9 +9,9 @@ IFÁ Labs is deployed natively on Sui as a Move package — not a port of the EV
 
 ## What Is Deployed on Sui
 
-Three packages are live on Sui Testnet:
+Four packages are live on Sui Testnet:
 
-<CardGroup cols={3}>
+<CardGroup cols={2}>
   <Card title="Oracle Contract" icon="database">
     The core price feed. Stores and exposes stablecoin prices via shared objects. This is what your protocol integrates against.
   </Card>
@@ -20,10 +20,18 @@ Three packages are live on Sui Testnet:
     Multi-token testnet faucet. Claim SUI and WAL for development and testing.
   </Card>
 
+  <Card title="Swap Contract" icon="right-left">
+    Live heterogeneous liquidity pool. Deposit, withdraw, swap, and sweep across SUI, CNGN, ZARP, and other listed assets — priced directly by the oracle.
+  </Card>
+
   <Card title="HLP Token" icon="coins">
-    Heterogeneous Liquidity Provider token. Foundation for the upcoming Sui swap contract. Not yet available for integration.
+    Heterogeneous Liquidity Provider token. Issued to liquidity providers in the swap pool. Minted and burned automatically by the swap contract.
   </Card>
 </CardGroup>
+
+<Note>
+  The swap contract is now live, not just planned. See [Sui Swap Contract](/sui-swap-overview) for the full integration guide.
+</Note>
 
 ---
 
@@ -33,9 +41,9 @@ Three packages are live on Sui Testnet:
 
 | Object | ID |
 | --- | --- |
-| **Package ID** | `0x4d165602d4bb3a7d428a3aa567e27cbe03c9de2ed5995f8c13d1adc4cd3d196f` |
-| **Feed Object ID** | `0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a` |
-| **Verifier Object ID** | `0x49ba59356bdd51f42ed433f452099e32251601027d4e7d39bf86e8e1c12c3ad5` |
+| **Package ID** | `0x99847c953ee11ca57b6d602494c914d7d82a2d42c4c8a80307331fead5b22c4a` |
+| **Feed Object ID** | `0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0` |
+| **Verifier Object ID** | `0x028e5df554ac7d253a132c60bcd13cf32bea9eb8c81d04d685c2a31299fbe43b` |
 
 ### Faucet
 
@@ -43,6 +51,10 @@ Three packages are live on Sui Testnet:
 | --- | --- |
 | **Package ID** | `0xf77385d9dc49cf4774c0411a2b36d89d294ad5fe42ab1f52cc7d515044b1fa27` |
 | **Registry ID** | `0x5c0dc844ba7647af146e9edf7618bdbf47025dd0816e60db7ad9256cafda1054` |
+
+<Warning>
+  The oracle package was redeployed. If you have any previously documented object IDs saved, they now point to a stale deployment and must be replaced with the values above.
+</Warning>
 
 <Warning>
   When reading prices, always pass the **Feed Object ID** — not the Package ID. The Package ID is only needed when importing `ifa_oracle` as a dependency in your own Move package's `Move.toml`.
@@ -199,20 +211,20 @@ All feeds available on EVM are also available on Sui Testnet. Asset IDs are iden
                     │  Shared object — stores all       │
                     │  asset prices keyed by Bytes32    │
                     │  asset ID                         │
-                    └───────────────┬─────────────────┘
-                                    │  get_asset_info
-                                    │  get_assets_info
-                                    │  get_pair_by_id
-                                    ▼
-                    ┌─────────────────────────────────┐
-                    │       Your Move Protocol          │
-                    │  Passes &IfaPriceFeed by          │
-                    │  immutable reference to read      │
-                    │  prices                           │
-                    └─────────────────────────────────┘
+                    └──────────────┬──────────────┬───┘
+                                   │              │
+                  get_asset_info   │              │  get_asset_info
+                  get_pair_by_id   │              │  get_pair_by_id
+                                   ▼              ▼
+                    ┌──────────────────┐  ┌──────────────────────┐
+                    │  Your Move        │  │  IFÁ Labs Swap        │
+                    │  Protocol          │  │  Contract (HSC)       │
+                    │  Passes &IfaPrice  │  │  Live liquidity pool  │
+                    │  Feed by reference │  │  priced by this feed  │
+                    └──────────────────┘  └──────────────────────┘
 ```
 
-**Key point:** Your protocol only ever interacts with `IfaPriceFeed` — the bottom shared object. You never interact with the verifier directly. The relayer and verifier are IFÁ Labs infrastructure.
+**Key point:** Your protocol only ever interacts with `IfaPriceFeed` — the bottom shared object. You never interact with the verifier directly. The relayer and verifier are IFÁ Labs infrastructure. The Swap Contract is itself a consumer of the oracle, exactly like any other protocol you'd build.
 
 ---
 
@@ -231,7 +243,7 @@ Before writing your first line of Move or TypeScript, confirm these:
     Price reads via `devInspectTransactionBlock` are free. You need SUI for deploying your own contracts. Claim from the [IFÁ Labs Faucet](/testnet-faucet) or [faucet.sui.io](https://faucet.sui.io).
   </Step>
   <Step title="Feed Object ID saved — not Package ID">
-    The value you use in transactions is: `0x9d5fc0fce3dc11efd95ef4b3218f3b45ff17012fbc629b35529f66833e46d91a`
+    The value you use in transactions is: `0x5d2728b862de08de767e4f8841a38c9452d951c0602e77fc47bfbb3ab03f33f0`
 
     Not the Package ID. Save this now.
   </Step>
@@ -253,6 +265,7 @@ Before writing your first line of Move or TypeScript, confirm these:
 | A TypeScript frontend or backend | Sui TypeScript SDK \+ `devInspectTransactionBlock` |
 | A quick test or CLI check | Sui CLI `client call` |
 | An AI tool or agent | IFÁ Labs MCP Server — `get_network_info` returns Sui object IDs |
+| A swap, sweep, or liquidity feature | `ifalabs::hetero_swap_periphery` — see [Sui Swap Contract](/sui-swap-overview) |
 
 ---
 
@@ -261,7 +274,7 @@ Before writing your first line of Move or TypeScript, confirm these:
 | Feature | Status |
 | --- | --- |
 | Sui Mainnet deployment | Planned — after testnet validation |
-| Sui swap contract | In development — HLP token deployed |
+| Sui Swap Contract mainnet | Planned — testnet live now, see [Sui Swap Contract](/sui-swap-overview) |
 | Additional Sui feeds | Based on ecosystem demand |
 
 ---
@@ -273,17 +286,17 @@ Before writing your first line of Move or TypeScript, confirm these:
     Full code examples for reading prices in Move and TypeScript.
   </Card>
 
-  <Card title="Function Reference" icon="code" href="/sui-function-reference">
-    Complete reference for every public function in the Sui Move contracts.
+  <Card title="Sui Swap Contract" icon="right-left" href="/sui-swap-overview">
+    Deposit, withdraw, swap, and sweep on the live testnet liquidity pool.
   </Card>
 </CardGroup>
 
 <CardGroup cols={2}>
-  <Card title="Testnet Faucet" icon="faucet" href="/testnet-faucet">
-    Claim testnet SUI and WAL for development.
+  <Card title="Function Reference" icon="code" href="/sui-function-reference">
+    Complete reference for every public function in the Sui Move oracle contract.
   </Card>
 
-  <Card title="Contract Addresses" icon="file-contract" href="/contract-addresses">
-    All Sui object IDs and EVM addresses in one place.
+  <Card title="Testnet Faucet" icon="faucet" href="/testnet-faucet">
+    Claim testnet SUI and WAL for development.
   </Card>
 </CardGroup>

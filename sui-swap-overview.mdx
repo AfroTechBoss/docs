@@ -1,0 +1,158 @@
+---
+title: "Sui Swap Contract Overview"
+description: "A live heterogeneous liquidity pool on Sui Testnet, priced directly by the IFÁ Labs oracle — deposit, withdraw, swap, and sweep across SUI, CNGN, ZARP, and more."
+---
+
+The IFÁ Labs Swap Contract is a heterogeneous liquidity pool (HLP) deployed natively on Sui, using the IFÁ Labs oracle for every pricing decision. It is not a constant-product AMM like Uniswap — it's an oracle-priced pool, meaning swap rates come directly from verified, on-chain stablecoin prices rather than from pool reserve ratios.
+
+This page covers what the pool is, how it works, what's deployed, and the core concepts you need before integrating.
+
+<Info>
+  This is a real, live product on Sui Testnet — not a planned feature. If you're looking for the underlying price feed it consumes, see the [Sui Integration Guide](/sui-read-latest-price).
+</Info>
+
+---
+
+## What the Swap Contract Does
+
+A single multi-asset pool holds reserves of several tokens at once. Anyone can:
+
+- **Deposit** a supported asset and receive HLP (Heterogeneous Liquidity Provider) tokens representing their share of the pool
+- **Withdraw** by burning HLP tokens to redeem a proportional share of any asset in the pool
+- **Swap** one supported asset directly for another, priced via the oracle
+- **Sweep** small "dust" balances of one asset into a single target asset in one transaction
+
+Every operation reads live prices from the IFÁ Labs `IfaPriceFeed` to determine fair value — there's no separate price discovery mechanism, no external AMM curve, and no dependence on trade volume to "find" the price.
+
+---
+
+## Why Oracle-Priced, Not AMM-Priced
+
+Constant-product AMMs (like Uniswap) derive price from the ratio of reserves in a pool — the price moves as people trade. That works well for volatile, speculative assets, but it's a poor fit for stablecoins:
+
+- **Slippage on stable assets is unnecessary risk.** If CNGN and USDT are both supposed to track \$1.00, an AMM curve can still let the price drift several percent on a large trade — even though both assets haven't actually moved in value.
+- **Oracle pricing reflects real-world value directly.** The swap contract prices every trade using the same manipulation-resistant price feed used across all of IFÁ Labs — the same feed protocols use for collateral valuation and liquidations.
+- **No impermanent loss from price discovery lag.** Liquidity providers aren't exposed to an AMM curve falling behind real market prices during volatility — the pool always quotes at the oracle's current price.
+
+This is the same architectural reasoning behind why IFÁ Labs built a stablecoin-focused oracle in the first place — applied directly to a swap product.
+
+---
+
+## Live Pool — Sui Testnet
+
+| Parameter | Value |
+| --- | --- |
+| **LP Fee** | 0.30% (30 bps) |
+| **Protocol Fee** | 0.10% (10 bps) |
+| **Max Price Age** | 1 hour (3,600,000 ms) |
+| **Sync Interval** | 10 minutes (600,000 ms) |
+| **Status** | Active, not paused |
+
+<Note>
+  Full object IDs — Package ID, Pool ID, AdminCap, and every asset vault — are documented on [Swap Contract Addresses](/sui-swap-contract-addresses).
+</Note>
+
+---
+
+## Supported Assets in the Pool
+
+| Asset | Coin Decimals | Target Weight | Status |
+| --- | --- | --- | --- |
+| SUI | 9 | 40% | Enabled |
+| USDSUI | 9 | 40% | Enabled |
+| CNGN | 6 | 40% | Enabled |
+| ZARP | 6 | 40% | Enabled |
+| WAL | — | — | Listed, not yet vaulted |
+
+<Info>
+  **Target weight** is the pool's ideal allocation per asset, used to calculate rebalancing incentives and trade limits. It is not a hard cap — it informs fee and slippage behaviour, not a rejection rule.
+</Info>
+
+Every enabled asset currently allows up to 100% of pool liquidity to be traded or withdrawn in a single transaction (`maxTradeBps` and `maxWithdrawBps` are both set to 10,000 / 100%) — there are no artificial per-transaction caps on testnet beyond the oracle freshness and slippage checks.
+
+---
+
+## Core Concepts
+
+### Pool
+
+The `Pool` object is the central shared object coordinating the entire swap contract — fee configuration, pause state, oracle freshness threshold, and sync interval. You pass it by mutable reference (`&mut Pool`) into every state-changing call, and by immutable reference (`&Pool`) into every read-only quote function.
+
+### Asset Vault
+
+Each supported asset has its own `AssetVault<T>` — a generic shared object holding the actual token reserves for that asset, plus its configuration (target weight, max trade size, enabled status). You always pass the vault matching the coin type you're depositing, withdrawing, or swapping.
+
+### Protocol Fee Vault
+
+Each asset also has a separate `ProtocolFeeVault<T>` that accumulates the protocol's cut of trading fees, isolated from user liquidity. Only relevant when swapping — deposits and withdrawals don't touch it directly.
+
+### HLP Token
+
+`HLP` is the pool's liquidity provider token — a single fungible token type representing proportional ownership across the _entire_ multi-asset pool, not a per-asset LP token. Depositing any supported asset mints HLP; burning HLP on withdrawal can redeem any asset in the pool (subject to available liquidity in that specific vault).
+
+### Sweep
+
+A specific entry point (`sweep`) for converting a small "dust" balance of one token directly into a target asset, in a single call. Functionally it's the same swap logic as `swap_exact_input` — it exists as a named, discoverable function so wallets and frontends can build one-click "clean up my wallet" UX without bypassing any of the pool's safety checks.
+
+---
+
+## Reading Pool State
+
+Before depositing, withdrawing, or swapping, you can inspect the pool's current state without spending gas — using `get_pool_summary` and `get_asset_summary`, both read-only functions that take the pool (and relevant vaults) by immutable reference. See [Swap Function Reference](/sui-swap-function-reference) for full signatures.
+
+---
+
+## Safety Checks on Every Operation
+
+Every state-changing function in the periphery module — `deposit_liquidity`, `withdraw_liquidity`, `swap_exact_input`, and `sweep` — routes through the same core logic in `hetero_swap_core`, which enforces:
+
+- **Oracle freshness.** The price feed for every asset involved must be within `maxPriceAgeMs` (currently 1 hour). Stale prices abort the transaction.
+- **Asset whitelist.** Only explicitly enabled assets can be deposited, withdrawn, or swapped.
+- **Slippage protection.** Every function takes a `min_amount_out` (or `min_lp_out`) parameter — the transaction aborts if the actual output would be less than your specified minimum.
+- **Pause state.** If the pool is paused by the admin, all state-changing operations abort.
+- **Liquidity sufficiency.** Withdrawals and swaps abort if the target vault doesn't hold enough of the requested asset.
+
+<Warning>
+  None of these checks can be bypassed by calling `hetero_swap_core` functions directly instead of going through the periphery module — `swap_exact_input`, `deposit_liquidity`, and `withdraw_liquidity` in the periphery module are thin wrappers around the same core logic. There's no shortcut path that skips freshness, whitelist, slippage, or pause checks.
+</Warning>
+
+---
+
+## What You Can Build With This
+
+- **Wallet integrations** — one-click dust sweeping across many small token balances into a single useful asset
+- **Stablecoin-to-stablecoin swap UIs** — CNGN ↔ ZARP, CNGN ↔ SUI, and similar pairs, priced fairly via the oracle rather than subject to AMM slippage
+- **Liquidity provision strategies** — earn LP fees by depositing into a multi-asset pool without managing multiple separate single-asset positions
+- **Treasury management tools** — protocols holding multiple stablecoins can rebalance via swap rather than routing through external DEXs
+
+---
+
+## What's Not Yet Available
+
+- **Sui Mainnet deployment** — testnet only for now
+- **WAL vault** — listed in the deployment config but no asset vault has been created for it yet
+- **Public audit** — the swap contract has not yet undergone a third-party security audit; do not use testnet liquidity as a signal of mainnet-readiness
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Swap Function Reference" icon="code" href="/sui-swap-function-reference">
+    Every public function — deposit, withdraw, swap, sweep, and quote — with full signatures and examples.
+  </Card>
+
+  <Card title="Swap Contract Addresses" icon="file-contract" href="/sui-swap-contract-addresses">
+    Package ID, Pool ID, AdminCap, and every asset vault on Sui Testnet.
+  </Card>
+</CardGroup>
+
+<CardGroup cols={2}>
+  <Card title="Sui Integration Guide" icon="circle-dot" href="/sui-read-latest-price">
+    Read the underlying oracle prices this pool consumes.
+  </Card>
+
+  <Card title="Testnet Faucet" icon="faucet" href="/testnet-faucet">
+    Claim testnet SUI and WAL to try the pool yourself.
+  </Card>
+</CardGroup>
